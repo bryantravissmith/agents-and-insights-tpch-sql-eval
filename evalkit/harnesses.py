@@ -467,7 +467,7 @@ class Antigravity(Harness):
             },
         )
         if obj and obj.get("status") != "SUCCESS":
-            u.error = f"status={obj.get('status')}"
+            u.error = f"status={obj.get('status')}: {obj.get('error') or ''}".rstrip(": ")[:300]
         return u
 
 

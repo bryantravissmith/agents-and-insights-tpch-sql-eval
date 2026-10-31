@@ -338,6 +338,21 @@ def test_resume_reruns_runs_graded_after_a_provider_cut(sandbox, monkeypatch, db
     assert json.loads((r.run_dir / "result.json").read_text())["verdict"] == "exact"
 
 
+def test_resume_reruns_quota_failures_recorded_without_detail(sandbox, monkeypatch, db, questions_on):
+    _with_fake(monkeypatch, FakeHarness(Q04_BODY + "ORDER BY 1"))
+    qdir = questions_on(db, "q04")
+    (r,) = runner.run_grid(load_question(qdir / "q04.toml", ["spec"]), ["fake:a"], batch="quota", quiet=True)
+    # As the old agy parser recorded it: the quota message was in the transcript but not in the result.
+    quota = "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 2h6m."
+    (r.run_dir / "transcript.jsonl").write_text(json.dumps({"status": "ERROR", "error": quota, "usage": {}}))
+    row = json.loads((r.run_dir / "result.json").read_text())
+    row |= {"verdict": "harness_error", "correct": False, "harness": "agy", "detail": "status=ERROR"}
+    (r.run_dir / "result.json").write_text(json.dumps(row))
+    assert harnesses.get("agy").parse(None, r.run_dir / "transcript.jsonl").error == f"status=ERROR: {quota}"
+    runner.resume("quota", questions=[qdir], quiet=True)
+    assert json.loads((r.run_dir / "result.json").read_text())["verdict"] == "exact"
+
+
 def test_reparse_fixes_agy_usage_from_the_transcript(sandbox):
     run = sandbox / "results" / "agyb" / "q01-spec-bare-agy-gemini-4-argon-r1"
     run.mkdir(parents=True)

@@ -548,9 +548,21 @@ def _execute(plan, batch, jobs, caps, db, quiet, run_kw) -> list[RunResult]:
 # Provider-side failures: the model never answered, so the run says nothing about it. Only these are re-run.
 PROVIDER_FAILURE = re.compile(
     r"rate limit|credit balance|overloaded|temporarily unavailable|service unavailable|internal server error"
-    r"|bad gateway|gateway timeout|an error occurred while processing your request|usage limit|limit reached",
+    r"|bad gateway|gateway timeout|an error occurred while processing your request|usage limit|limit reached"
+    r"|quota|resource_exhausted",
     re.IGNORECASE,
 )
+
+
+def _transcript_error(run_dir: Path, row: dict) -> str:
+    """The run's error as the current parser reads it from the saved transcript (older parsers dropped detail)."""
+    from types import SimpleNamespace
+
+    transcript = run_dir / "transcript.jsonl"
+    if not transcript.exists() or not row.get("harness"):
+        return ""
+    ctx = SimpleNamespace(run_dir=run_dir, model=row.get("model"))
+    return harnesses.get(row["harness"]).parse(ctx, transcript).error or ""
 
 
 def resume(
@@ -594,7 +606,9 @@ def resume(
         result = run_dir / "result.json"
         if result.exists():
             row = json.loads(result.read_text())
-            failed = row.get("verdict") == "harness_error" and PROVIDER_FAILURE.search(row.get("detail", ""))
+            failed = row.get("verdict") == "harness_error" and PROVIDER_FAILURE.search(
+                f"{row.get('detail', '')} {_transcript_error(run_dir, row)}"
+            )
             # Runs recorded before the provider-cut rule: graded on an exploratory query after the API failed.
             cut_short = row.get("sql_source") != "submit" and PROVIDER_FAILURE.search(row.get("error") or "")
             if not (failed or cut_short):
