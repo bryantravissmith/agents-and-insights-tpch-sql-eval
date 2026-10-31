@@ -435,6 +435,13 @@ def test_progress_reads_running_batches(tmp_path):
     assert "b-done" not in out  # finished batches only when named
     assert "no new run for 60 min" in out
     assert "done" in runner.progress(["b-done"], results=tmp_path, now=now).splitlines()[1]
+    # A resume makes a finished batch show as running again, paced from when the resume started.
+    batch("b-resume", planned=100, done=94, correct=80, started_min_ago=600, finished=True)
+    m = json.loads((tmp_path / "b-resume" / "manifest.json").read_text())
+    m["resuming"] = {"started_at": (now - timedelta(minutes=2)).isoformat(), "runs_at_start": 90, "rerunning": 10}
+    (tmp_path / "b-resume" / "manifest.json").write_text(json.dumps(m))
+    resume = next(line for line in runner.progress(results=tmp_path, now=now).splitlines() if "b-resume" in line)
+    assert "94/100" in resume and " 2.0 " in resume and "3 min" in resume and resume.endswith("resuming")
 
 
 def test_dry_run_and_agents_json(sandbox, monkeypatch, db, questions_on, tmp_path):

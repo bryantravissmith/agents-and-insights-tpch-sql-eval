@@ -636,7 +636,15 @@ def resume(
         )
     caps = {h: threading.Semaphore(n) for h, n in (harness_jobs or {}).items()}
     started = time.monotonic()
+    # So `progress` shows the batch as running again until this resume finishes.
+    manifest["resuming"] = {
+        "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "runs_at_start": len(list(batch_dir.glob("*/result.json"))),
+        "rerunning": len(todo),
+    }
+    write_manifest(batch_dir, manifest)
     results = _execute(todo, batch, jobs, caps, None, quiet, run_kw)
+    del manifest["resuming"]
 
     rows = [
         json.loads((batch_dir / _run_name(*p) / "result.json").read_text())
@@ -788,22 +796,26 @@ def progress(batches: list[str] | None = None, results: Path | None = None, now:
     lines = [f"{'batch':42} {'done':>11} {'pct':>6} {'correct':>8} {'per min':>8} {'left':>9}  state"]
     for manifest_path in sorted(results.glob("*/manifest.json")):
         m = json.loads(manifest_path.read_text())
-        finished = "completed_at" in m
+        resuming = m.get("resuming")
+        finished = "completed_at" in m and not resuming
         if batches and not any(b in m["batch"] for b in batches):
             continue
         if not batches and finished:
             continue
         runs = list(manifest_path.parent.glob("*/result.json"))
         correct = sum(json.loads(p.read_text()).get("correct") in (True, 1, "1") for p in runs)
-        minutes = max((now - datetime.fromisoformat(m["created_at"])).total_seconds() / 60, 1e-9)
-        pace = len(runs) / minutes
+        # A resume's pace counts only the runs it has finished, from when it started.
+        since, base = (resuming["started_at"], resuming["runs_at_start"]) if resuming else (m["created_at"], 0)
+        minutes = max((now - datetime.fromisoformat(since)).total_seconds() / 60, 1e-9)
+        pace = (len(runs) - base) / minutes
         newest = max((p.stat().st_mtime for p in runs), default=manifest_path.stat().st_mtime)
         quiet_min = (now.timestamp() - newest) / 60
         if finished:
             left, state = "-", "done"
         else:
             left = f"{(m['planned_runs'] - len(runs)) / pace:.0f} min" if pace else "?"
-            state = "running" if quiet_min < 15 else f"no new run for {quiet_min:.0f} min"
+            state = "resuming" if resuming else "running"
+            state = state if quiet_min < 15 else f"no new run for {quiet_min:.0f} min"
         lines.append(
             f"{m['batch']:42} {len(runs):>5}/{m['planned_runs']:<5} {100 * len(runs) / m['planned_runs']:5.1f}% "
             f"{correct:>8} {pace:8.1f} {left:>9}  {state}"
