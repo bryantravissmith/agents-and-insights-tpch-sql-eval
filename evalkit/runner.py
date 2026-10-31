@@ -10,6 +10,7 @@ It is deleted after the run unless keep_work=True.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -415,6 +416,79 @@ def preflight(
         raise SystemExit("preflight failed:\n  " + "\n  ".join(problems))
 
 
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _cli_version(binary: str) -> str:
+    """`binary --version`, or the executable's hash when the CLI has no usable version flag."""
+    path = shutil.which(binary)
+    if not path:
+        return "missing"
+    try:
+        out = subprocess.run([binary, "--version"], check=False, capture_output=True, text=True, timeout=30)
+        text = (out.stdout or out.stderr).strip()
+        if out.returncode == 0 and text:
+            return text.splitlines()[0]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return f"{path} sha256:{_sha256(Path(path).read_bytes())}"
+
+
+def _git_state() -> dict:
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(HARNESS_DIR), *args], check=False, capture_output=True, text=True
+        ).stdout.strip()
+
+    return {
+        "commit": git("rev-parse", "HEAD") or None,
+        "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
+    }
+
+
+def batch_manifest(batch, tasks, agents, conditions, repeats, jobs, harness_jobs, db, run_kw, planned_runs) -> dict:
+    """What a batch asked for and what it ran on, so a published number traces to exact inputs."""
+    import duckdb
+
+    code = [HARNESS_DIR / p for p in ("evals.py", "sqlguard.py", "mcp_server.py")]
+    code += sorted((HARNESS_DIR / "evalkit").glob("*.py")) + sorted((HARNESS_DIR / "extensions").glob("*"))
+    code += [p for c in conditions for p in sorted((CONDITIONS / c).rglob("*")) if p.is_file()]
+    dbs = sorted({resolve_db(t, db or DB) for t in tasks})
+    binaries = sorted({harnesses.get(a.harness).binary for a in agents})
+    return {
+        "batch": batch,
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "argv": sys.argv,
+        "git": _git_state(),
+        "planned_runs": planned_runs,
+        "repeats": repeats,
+        "jobs": jobs,
+        "harness_jobs": harness_jobs or {},
+        "conditions": conditions,
+        "run_options": {k: v for k, v in run_kw.items() if isinstance(v, (str, int, float, bool))},
+        "agents": [asdict(a) | {"label": str(a)} for a in agents],
+        "tasks": [
+            {
+                "id": t.id,
+                "level": t.level,
+                "prompt_sha": t.prompt_sha,
+                "target_sha256": _sha256(t.target_sql.encode()),
+                "db": resolve_db(t, db or DB).name,
+            }
+            for t in tasks
+        ],
+        "versions": {b: _cli_version(b) for b in binaries}
+        | {"python": sys.version.split()[0], "duckdb": duckdb.__version__},
+        "sha256": {str(p.relative_to(HARNESS_DIR)): _sha256(p.read_bytes()) for p in code if p.is_file()}
+        | {f"db:{p.name}": _sha256(p.read_bytes()) for p in dbs},
+    }
+
+
+def write_manifest(batch_dir: Path, manifest: dict):
+    (batch_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str) + "\n")
+
+
 def run_grid(
     tasks: list[Task],
     agents: list[Agent | str],
@@ -427,12 +501,15 @@ def run_grid(
     db: Path | None = None,
     allow_leaky: bool = False,
     quiet: bool = False,
+    dry_run: bool = False,
     **run_kw,
 ) -> list[RunResult]:
     """Every task x agent x condition x repeat, `jobs` at a time (`harness_jobs` caps one CLI, e.g. {"agy": 2}).
 
     Runs are ordered repeat-major with agents innermost, so concurrent slots spread across providers
-    and an interrupted grid still has complete early repeats.
+    and an interrupted grid still has complete early repeats. The batch directory gets manifest.json
+    before the first run (what was asked for, versions, hashes) and again at the end (how it went).
+    `dry_run` prints the plan and runs nothing.
     """
     agents = [Agent.parse(a) for a in agents]
     conditions = list(conditions)
@@ -445,6 +522,18 @@ def run_grid(
             f"batch {batch}: {len(plan)} runs ({len(tasks)} tasks x {len(agents)} agents x "
             f"{len(conditions)} conditions x {repeats} repeats), {jobs} parallel"
         )
+    if dry_run:
+        if not quiet:
+            for a in agents:
+                print(f"  agent {a}: {a.harness} {a.model} {' '.join(a.extra_args)}".rstrip())
+            for t in tasks:
+                print(f"  task {t.name} prompt {t.prompt_sha} db {resolve_db(t, db or DB).name}")
+        return []
+    batch_dir = RESULTS / batch
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    manifest = batch_manifest(batch, tasks, agents, conditions, repeats, jobs, harness_jobs, db, run_kw, len(plan))
+    write_manifest(batch_dir, manifest)
+    started = time.monotonic()
 
     def go(t, a, c, r):
         cap = caps.get(a.harness)
@@ -468,9 +557,17 @@ def run_grid(
                 # fails outside run_one's launch exception handler.
                 run_dir = RESULTS / batch / f"{t.id}-{t.level}-{c}-{a.slug}-r{r}"
                 run_dir.mkdir(parents=True, exist_ok=True)
-                res = RunResult(batch=batch, task=t, agent=a, condition=c, repeat=r,
-                                run_dir=run_dir, verdict="harness_error", sql_source="none",
-                                detail=f"{type(e).__name__}: {e}"[:300])
+                res = RunResult(
+                    batch=batch,
+                    task=t,
+                    agent=a,
+                    condition=c,
+                    repeat=r,
+                    run_dir=run_dir,
+                    verdict="harness_error",
+                    sql_source="none",
+                    detail=f"{type(e).__name__}: {e}"[:300],
+                )
                 res.usage.error = res.detail
                 (run_dir / "prompt.md").write_text(t.prompt + "\n")
                 (run_dir / "result.json").write_text(json.dumps(res.to_row() | {"detail": res.detail}, indent=2))
@@ -484,8 +581,12 @@ def run_grid(
         (WORK_ROOT / batch).rmdir()  # empty once every run has cleaned up after itself
     except OSError:
         pass
-    batch_dir = RESULTS / batch
-    batch_dir.mkdir(parents=True, exist_ok=True)
+    manifest.update(
+        completed_at=datetime.now(UTC).isoformat(timespec="seconds"),
+        elapsed_seconds=round(time.monotonic() - started, 1),
+        recorded_runs=len(results),
+    )
+    write_manifest(batch_dir, manifest)
     rows = [r.to_row() for r in results]
     with open(batch_dir / "results.jsonl", "w") as f:
         f.writelines(json.dumps(row) + "\n" for row in rows)

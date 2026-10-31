@@ -1,0 +1,17 @@
+[
+  {"harness": "pi", "model": "anthropic/claude-haiku-5-5", "extra_args": ["--thinking", "medium"], "label": "pi:haiku-5.5"},
+  {"harness": "pi", "model": "anthropic/claude-sonnet-5-5", "extra_args": ["--thinking", "medium"], "label": "pi:sonnet-5.5"},
+  {"harness": "pi", "model": "anthropic/claude-opus-5-5", "extra_args": ["--thinking", "medium"], "label": "pi:opus-5.5"},
+  {"harness": "pi", "model": "anthropic/claude-fable-5-1", "extra_args": ["--thinking", "medium"], "label": "pi:fable-5.1"},
+  {"harness": "pi", "model": "openai/gpt-5.6-luna", "extra_args": ["--thinking", "medium"], "label": "pi:gpt-5.6-luna"},
+  {"harness": "pi", "model": "openai/gpt-5.6-terra", "extra_args": ["--thinking", "medium"], "label": "pi:gpt-5.6-terra"},
+  {"harness": "pi", "model": "openai/gpt-5.6-sol", "extra_args": ["--thinking", "medium"], "label": "pi:gpt-5.6-sol"},
+  {"harness": "pi", "model": "openai/gpt-6-luna", "extra_args": ["--thinking", "medium"], "label": "pi:gpt-6-luna"},
+  {"harness": "pi", "model": "openai/gpt-6.1-terra", "extra_args": ["--thinking", "medium"], "label": "pi:gpt-6.1-terra"},
+  {"harness": "pi", "model": "openai/gpt-6.1-sol", "extra_args": ["--thinking", "medium"], "label": "pi:gpt-6.1-sol"},
+  {"harness": "pi", "model": "openai/gpt-6-astra", "extra_args": ["--thinking", "medium"], "label": "pi:gpt-6-astra"},
+  {"harness": "pi", "model": "xai/grok-4.5", "extra_args": ["--thinking", "medium"], "label": "pi:grok-4.5"},
+  {"harness": "pi", "model": "xai/grok-4.7", "extra_args": ["--thinking", "medium"], "label": "pi:grok-4.7"},
+  {"harness": "agy", "model": "gemini-3.8-flash-medium", "extra_args": [], "label": "agy:gemini-3.8-flash"},
+  {"harness": "agy", "model": "gemini-4-argon-medium", "extra_args": [], "label": "agy:gemini-4-argon"}
+]

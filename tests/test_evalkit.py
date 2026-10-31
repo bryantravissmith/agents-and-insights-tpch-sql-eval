@@ -5,6 +5,7 @@ Tests that take `db` run on the synthetic database and, when it exists, on tpch.
 uv run --with pytest --with duckdb --with 'mcp<2' pytest tests/ -q
 """
 
+import json
 import sys
 import tomllib
 from pathlib import Path
@@ -178,6 +179,7 @@ def test_missing_columns(db):
 
 # ---------- runner, with a fake harness that "answers" by writing what the tools would write ----------
 
+import evals
 from evalkit import runner
 
 
@@ -255,6 +257,32 @@ def test_run_grid_parallel_repeats_and_summary(sandbox, monkeypatch, db, questio
     header = summary.splitlines()[0].split()
     assert header[1:4] == ["terse", "stakeholder", "spec"] and "3/3" in summary
     assert not (sandbox / "work" / "g").exists()
+    manifest = json.loads((sandbox / "results" / "g" / "manifest.json").read_text())
+    assert manifest["planned_runs"] == manifest["recorded_runs"] == len(res)
+    assert [a["label"] for a in manifest["agents"]] == ["fake:a", "fake:b"]
+    assert {(t["id"], t["level"]) for t in manifest["tasks"]} == {
+        ("q04", lv) for lv in ("terse", "stakeholder", "spec")
+    }
+    assert all(t["prompt_sha"] for t in manifest["tasks"]) and "completed_at" in manifest
+    assert any(k.startswith("db:") for k in manifest["sha256"]) and "evalkit/grading.py" in manifest["sha256"]
+
+
+def test_dry_run_and_agents_json(sandbox, monkeypatch, db, questions_on, tmp_path):
+    fake = FakeHarness(Q04_BODY)
+    _with_fake(monkeypatch, fake)
+    agents = tmp_path / "agents.json"
+    agents.write_text(
+        json.dumps([{"harness": "fake", "model": "m", "extra_args": ["--thinking", "medium"], "label": "fake:m@med"}])
+    )
+    q04 = str(questions_on(db, "q04") / "q04.toml")
+    assert evals.main(["run", q04, "--agents-json", str(agents), "--name", "dry", "--dry-run"]) == 0
+    assert not list((sandbox / "results").glob("*dry*"))  # nothing ran, nothing written
+    assert evals.main(["run", q04, "-l", "spec", "--agents-json", str(agents), "--name", "wet"]) == 0
+    (batch,) = (sandbox / "results").glob("*wet")
+    manifest = json.loads((batch / "manifest.json").read_text())
+    assert manifest["agents"][0]["extra_args"] == ["--thinking", "medium"] and manifest["recorded_runs"] == 1
+    with pytest.raises(SystemExit):
+        evals.main(["run", q04, "--agents", "fake:m", "fake:m"])  # duplicate labels would share run dirs
 
 
 def test_summary_splits_edited_prompts():

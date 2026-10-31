@@ -16,6 +16,7 @@ Agents are harness:model. Models are named the way that CLI names them (pi: prov
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evalkit import (
     HARNESSES,
+    Agent,
     Task,
     grade_sql,
     load_questions,
@@ -34,7 +36,12 @@ from evalkit.runner import DB, new_batch_id
 
 
 def _grid_args(p: argparse.ArgumentParser):
-    p.add_argument("--agents", "-a", nargs="+", required=True, help="harness:model, e.g. codex:gpt-5.6-luna")
+    p.add_argument("--agents", "-a", nargs="+", default=[], help="harness:model, e.g. codex:gpt-5.6-luna")
+    p.add_argument(
+        "--agents-json",
+        type=Path,
+        help='file with a list of {"harness", "model", "extra_args", "label"}; extra_args go to the CLI verbatim',
+    )
     p.add_argument("--conditions", "-c", nargs="+", default=["bare"], help="conditions/<name> (default: bare)")
     p.add_argument("--repeats", "-r", type=int, default=1)
     p.add_argument("--jobs", "-j", type=int, default=4, help="parallel runs (default 4)")
@@ -44,6 +51,7 @@ def _grid_args(p: argparse.ArgumentParser):
     p.add_argument("--name", help="suffix for the batch id")
     p.add_argument("--keep-work", action="store_true", help="keep the agent's scratch dir for debugging")
     p.add_argument("--allow-leaky", action="store_true", help="skip the TPC-H / query-number prompt check")
+    p.add_argument("--dry-run", action="store_true", help="print the plan and each prompt's hash, run nothing")
     _db_arg(p)
 
 
@@ -57,11 +65,24 @@ def _target(args) -> str:
     return args.target_sql or Path(args.target_sql_file).read_text()
 
 
+def _agents(args) -> list[Agent]:
+    agents = [Agent.parse(a) for a in args.agents]
+    if args.agents_json:
+        for spec in json.loads(args.agents_json.read_text()):
+            agents.append(Agent(spec["harness"], spec["model"], tuple(spec.get("extra_args", ())), spec.get("label")))
+    if not agents:
+        raise SystemExit("give --agents and/or --agents-json")
+    slugs = [a.slug for a in agents]
+    if len(set(slugs)) != len(slugs):
+        raise SystemExit(f"agent labels must be unique: {slugs}")
+    return agents
+
+
 def _grid(tasks, args):
     caps = {k: int(v) for k, v in (s.split("=", 1) for s in args.harness_jobs)}
     results = run_grid(
         tasks,
-        args.agents,
+        _agents(args),
         conditions=args.conditions,
         repeats=args.repeats,
         jobs=args.jobs,
@@ -72,8 +93,9 @@ def _grid(tasks, args):
         timeout_s=args.timeout,
         max_turns=args.max_turns,
         keep_work=args.keep_work,
+        dry_run=args.dry_run,
     )
-    return 0 if results else 1
+    return 0 if results or args.dry_run else 1
 
 
 def main(argv=None) -> int:
