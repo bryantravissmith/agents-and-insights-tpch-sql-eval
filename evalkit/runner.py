@@ -489,6 +489,152 @@ def write_manifest(batch_dir: Path, manifest: dict):
     (batch_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str) + "\n")
 
 
+def _run_name(t: Task, a: Agent, c: str, r: int) -> str:
+    return f"{t.id}-{t.level}-{c}-{a.slug}-r{r}"
+
+
+def _execute(plan, batch, jobs, caps, db, quiet, run_kw) -> list[RunResult]:
+    """Run (task, agent, condition, repeat) tuples `jobs` at a time; a crashed attempt is recorded, not dropped."""
+
+    def go(t, a, c, r):
+        cap = caps.get(a.harness)
+        if cap:
+            cap.acquire()
+        try:
+            return run_one(t, a, condition=c, repeat=r, batch=batch, db=db, **run_kw)
+        finally:
+            if cap:
+                cap.release()
+
+    results: list[RunResult] = []
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = {pool.submit(go, *p): p for p in plan}
+        for i, fut in enumerate(as_completed(futures), 1):
+            t, a, c, r = futures[fut]
+            try:
+                res = fut.result()
+            except Exception as e:  # noqa: BLE001
+                # A crashed attempt belongs in the denominator, even when it
+                # fails outside run_one's launch exception handler.
+                run_dir = RESULTS / batch / _run_name(t, a, c, r)
+                run_dir.mkdir(parents=True, exist_ok=True)
+                res = RunResult(
+                    batch=batch,
+                    task=t,
+                    agent=a,
+                    condition=c,
+                    repeat=r,
+                    run_dir=run_dir,
+                    verdict="harness_error",
+                    sql_source="none",
+                    detail=f"{type(e).__name__}: {e}"[:300],
+                )
+                res.usage.error = res.detail
+                (run_dir / "prompt.md").write_text(t.prompt + "\n")
+                (run_dir / "result.json").write_text(json.dumps(res.to_row() | {"detail": res.detail}, indent=2))
+                if run_kw.get("record", True):
+                    append_scorecard(res.to_row())
+            results.append(res)
+            if not quiet:
+                print(f"[{i}/{len(plan)}] {res.line()}", flush=True)
+    return results
+
+
+# Provider-side failures: the model never answered, so the run says nothing about it. Only these are re-run.
+PROVIDER_FAILURE = re.compile(
+    r"rate limit|credit balance|overloaded|temporarily unavailable|service unavailable|internal server error"
+    r"|bad gateway|gateway timeout|an error occurred while processing your request",
+    re.IGNORECASE,
+)
+
+
+def resume(
+    batch: str,
+    *,
+    jobs: int = 4,
+    harness_jobs: dict[str, int] | None = None,
+    questions: list[Path] | None = None,
+    quiet: bool = False,
+) -> list[RunResult]:
+    """Finish a batch: run the planned runs that never ran or that failed on the provider's side.
+
+    The plan comes from the batch's manifest, and every task's composed prompt must still hash to what the
+    batch ran (questions edited since then are refused). A replaced attempt moves to `_replaced/` and the
+    manifest's `resumes` list records what was re-run and why. Model outcomes, timeouts included, are never re-run.
+    """
+    from .tasks import load_questions
+
+    batch_dir = RESULTS / batch
+    manifest = json.loads((batch_dir / "manifest.json").read_text())
+    by_key = {(t.id, t.level): t for t in load_questions(*(questions or [HARNESS_DIR / "questions"]))}
+    tasks = []
+    for spec in manifest["tasks"]:
+        t = by_key.get((spec["id"], spec["level"]))
+        if t is None or t.prompt_sha != spec["prompt_sha"]:
+            raise ValueError(
+                f"{spec['id']}/{spec['level']}: prompt changed or missing since the batch ran; start a new batch"
+            )
+        tasks.append(t)
+    agents = [Agent(a["harness"], a["model"], tuple(a["extra_args"]), a.get("label")) for a in manifest["agents"]]
+    conditions, repeats = manifest["conditions"], manifest["repeats"]
+    run_kw = {
+        k: v for k, v in manifest["run_options"].items() if k in ("timeout_s", "max_turns", "keep_work", "record")
+    }
+    plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in agents]
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    todo, missing, provider = [], 0, Counter()
+    for p in plan:
+        run_dir = batch_dir / _run_name(*p)
+        result = run_dir / "result.json"
+        if result.exists():
+            row = json.loads(result.read_text())
+            if row.get("verdict") != "harness_error" or not PROVIDER_FAILURE.search(row.get("detail", "")):
+                continue
+            provider[p[1].label or str(p[1])] += 1
+        else:
+            missing += 1
+        if run_dir.exists():
+            aside = batch_dir / "_replaced" / f"{run_dir.name}-{stamp}"
+            aside.parent.mkdir(exist_ok=True)
+            run_dir.rename(aside)
+        todo.append(p)
+    if not quiet:
+        print(
+            f"batch {batch}: {len(plan)} planned, re-running {len(todo)} ({missing} never finished, "
+            f"{sum(provider.values())} provider failures), {jobs} parallel"
+        )
+    caps = {h: threading.Semaphore(n) for h, n in (harness_jobs or {}).items()}
+    started = time.monotonic()
+    results = _execute(todo, batch, jobs, caps, None, quiet, run_kw)
+
+    rows = [
+        json.loads((batch_dir / _run_name(*p) / "result.json").read_text())
+        for p in plan
+        if (batch_dir / _run_name(*p) / "result.json").exists()
+    ]
+    manifest.setdefault("resumes", []).append(
+        {
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "git": _git_state(),
+            "rerun_never_finished": missing,
+            "rerun_provider_failures": dict(provider),
+            "jobs": jobs,
+            "elapsed_seconds": round(time.monotonic() - started, 1),
+            "replaced_attempts_in": "_replaced/",
+        }
+    )
+    manifest.update(completed_at=datetime.now(UTC).isoformat(timespec="seconds"), recorded_runs=len(rows))
+    write_manifest(batch_dir, manifest)
+    with open(batch_dir / "results.jsonl", "w") as f:
+        f.writelines(json.dumps({k: row.get(k, "") for k in COLS}) + "\n" for row in rows)
+    report = summarize(rows)
+    (batch_dir / "summary.txt").write_text(report + "\n")
+    if not quiet:
+        print("\n" + report)
+    return results
+
+
 def run_grid(
     tasks: list[Task],
     agents: list[Agent | str],
@@ -534,49 +680,7 @@ def run_grid(
     manifest = batch_manifest(batch, tasks, agents, conditions, repeats, jobs, harness_jobs, db, run_kw, len(plan))
     write_manifest(batch_dir, manifest)
     started = time.monotonic()
-
-    def go(t, a, c, r):
-        cap = caps.get(a.harness)
-        if cap:
-            cap.acquire()
-        try:
-            return run_one(t, a, condition=c, repeat=r, batch=batch, db=db, **run_kw)
-        finally:
-            if cap:
-                cap.release()
-
-    results: list[RunResult] = []
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = {pool.submit(go, *p): p for p in plan}
-        for i, fut in enumerate(as_completed(futures), 1):
-            t, a, c, r = futures[fut]
-            try:
-                res = fut.result()
-            except Exception as e:  # noqa: BLE001
-                # A crashed attempt belongs in the denominator, even when it
-                # fails outside run_one's launch exception handler.
-                run_dir = RESULTS / batch / f"{t.id}-{t.level}-{c}-{a.slug}-r{r}"
-                run_dir.mkdir(parents=True, exist_ok=True)
-                res = RunResult(
-                    batch=batch,
-                    task=t,
-                    agent=a,
-                    condition=c,
-                    repeat=r,
-                    run_dir=run_dir,
-                    verdict="harness_error",
-                    sql_source="none",
-                    detail=f"{type(e).__name__}: {e}"[:300],
-                )
-                res.usage.error = res.detail
-                (run_dir / "prompt.md").write_text(t.prompt + "\n")
-                (run_dir / "result.json").write_text(json.dumps(res.to_row() | {"detail": res.detail}, indent=2))
-                if run_kw.get("record", True):
-                    append_scorecard(res.to_row())
-            results.append(res)
-            if not quiet:
-                print(f"[{i}/{len(plan)}] {res.line()}", flush=True)
-
+    results = _execute(plan, batch, jobs, caps, db, quiet, run_kw)
     try:
         (WORK_ROOT / batch).rmdir()  # empty once every run has cleaned up after itself
     except OSError:

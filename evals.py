@@ -11,6 +11,7 @@
   uv run evals.py grade my_attempt.sql --target-sql-file tpch/queries/q21.sql    # no agent, just the grader
   uv run evals.py summary [--batch latest | <batch id>]
   uv run evals.py progress [<batch id or substring> ...]                              # while a batch runs
+  uv run evals.py resume <batch id> -j 6                                             # re-run unfinished and provider-failed runs
   uv run evals.py harnesses                                                           # what is installed
 
 Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
@@ -34,7 +35,7 @@ from evalkit import (
     run_grid,
     summarize,
 )
-from evalkit.runner import DB, new_batch_id
+from evalkit.runner import DB, new_batch_id, resume
 
 
 def _grid_args(p: argparse.ArgumentParser):
@@ -130,7 +131,16 @@ def main(argv=None) -> int:
     p = sub.add_parser("progress", help="runs finished, correct so far and time left for unfinished batches")
     p.add_argument("batches", nargs="*", help="batch ids or substrings (default: every unfinished batch)")
 
+    p = sub.add_parser("resume", help="finish a batch: re-run what never ran or failed on the provider's side")
+    p.add_argument("batch", help="batch id (the folder name under results/)")
+    p.add_argument("--jobs", "-j", type=int, default=4, help="parallel runs (default 4)")
+    p.add_argument("--harness-jobs", nargs="*", default=[], metavar="HARNESS=N", help="per-CLI cap, e.g. agy=2")
+
     args = ap.parse_args(argv)
+    if args.cmd == "resume":
+        caps = {k: int(v) for k, v in (s.split("=", 1) for s in args.harness_jobs)}
+        resume(args.batch, jobs=args.jobs, harness_jobs=caps)
+        return 0
     if args.cmd == "progress":
         print(progress(args.batches))
         return 0

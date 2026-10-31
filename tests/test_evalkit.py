@@ -267,6 +267,55 @@ def test_run_grid_parallel_repeats_and_summary(sandbox, monkeypatch, db, questio
     assert any(k.startswith("db:") for k in manifest["sha256"]) and "evalkit/grading.py" in manifest["sha256"]
 
 
+class FlakyHarness(FakeHarness):
+    """Fails its first `failures` runs the way a rate-limited provider does, then answers normally."""
+
+    def __init__(self, sql, failures):
+        super().__init__(sql)
+        self.failures = failures
+
+    def command(self, ctx):
+        if self.failures > 0:
+            self.failures -= 1
+            return [sys.executable, "-c", 'import sys; print(\'{"error": "Rate limit exceeded"}\'); sys.exit(1)']
+        return super().command(ctx)
+
+    def parse(self, ctx, stdout):
+        body = json.loads(stdout.read_text())
+        if "error" in body:
+            return harnesses.Usage(error=f"OpenAI API error (429): {body['error']}")
+        return super().parse(ctx, stdout)
+
+
+def test_resume_reruns_provider_failures_and_unfinished_runs(sandbox, monkeypatch, db, questions_on):
+    _with_fake(monkeypatch, FlakyHarness(Q04_BODY + "ORDER BY 1", failures=2))
+    qdir = questions_on(db, "q04")
+    tasks = load_question(qdir / "q04.toml", ["spec"])
+    res = runner.run_grid(tasks, ["fake:a"], repeats=3, jobs=1, batch="flaky", quiet=True, timeout_s=60)
+    assert sorted(r.verdict for r in res) == ["exact", "harness_error", "harness_error"]
+    batch_dir = sandbox / "results" / "flaky"
+    (ok,) = [r for r in res if r.verdict == "exact"]
+    (ok.run_dir / "result.json").unlink()  # as if the batch was stopped mid-run
+    runner.resume("flaky", jobs=1, questions=[qdir], quiet=True)
+    rows = [json.loads(line) for line in (batch_dir / "results.jsonl").read_text().splitlines()]
+    assert len(rows) == 3 and all(r["verdict"] == "exact" for r in rows)
+    assert len(list((batch_dir / "_replaced").iterdir())) == 3
+    (entry,) = json.loads((batch_dir / "manifest.json").read_text())["resumes"]
+    assert entry["rerun_never_finished"] == 1 and entry["rerun_provider_failures"] == {"fake:a": 2}
+    # A model outcome is never re-run: a second resume finds nothing to do.
+    assert runner.resume("flaky", jobs=1, questions=[qdir], quiet=True) == []
+
+
+def test_resume_refuses_edited_prompts(sandbox, monkeypatch, db, questions_on):
+    _with_fake(monkeypatch, FakeHarness(Q04_BODY + "ORDER BY 1"))
+    qdir = questions_on(db, "q04")
+    runner.run_grid(load_question(qdir / "q04.toml", ["spec"]), ["fake:a"], batch="edited", quiet=True)
+    f = qdir / "q04.toml"
+    f.write_text(f.read_text().replace("Question from the operations team:", "Question from ops:"))
+    with pytest.raises(ValueError, match="prompt changed"):
+        runner.resume("edited", questions=[qdir], quiet=True)
+
+
 def test_progress_reads_running_batches(tmp_path):
     import os
     from datetime import UTC, datetime, timedelta
