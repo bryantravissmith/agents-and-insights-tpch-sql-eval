@@ -29,7 +29,7 @@ Run them alongside the TPC-H ladder (`uv run evals.py run questions/tpch questio
 
 ## Hard novel questions (`tpch-hard/`)
 
-Six questions written on 2026-10-31 to separate the strongest models from strong ones. The difficulty is in exact multi-step reasoning, not in vagueness: the `spec` level defines everything, and the agent still has to get islands, sessions, running thresholds, an unusual percentile, a comparable partial-year window or tied ranks exactly right. Each target agrees with an independently written second query, and `tests/test_evalkit.py` checks that the tempting shortcut grades wrong. Their difficulty is not yet calibrated: run the frontier models on the `spec` level before calling any of them hard.
+Six questions written on 2026-10-31 to separate the strongest models from strong ones. The difficulty is in exact multi-step reasoning, not in vagueness: the `spec` level defines everything, and the agent still has to get islands, sessions, running thresholds, an unusual percentile, a comparable partial-year window or tied ranks exactly right. Each target agrees with an independently written second query, and `tests/test_evalkit.py` checks that the tempting shortcut grades wrong.
 
 | Id | Business question | What makes it hard |
 | --- | --- | --- |
