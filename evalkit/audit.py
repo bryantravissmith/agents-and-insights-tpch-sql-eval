@@ -160,6 +160,7 @@ def recall_markers(
             or v.upper() in data_values
             or re.fullmatch(r"\d{4}-\d{2}-\d{2}", v)
             or re.fullmatch(r"\d+ (day|month|year)s?", v.lower())
+            or re.fullmatch(r"(%[A-Za-z]|[-/:. ])+", v)  # a date format such as '%Y-%m'
         ):
             continue
         markers.add(f"str:{v}")

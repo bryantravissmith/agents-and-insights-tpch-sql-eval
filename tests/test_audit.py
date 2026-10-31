@@ -131,3 +131,10 @@ def test_a_title_the_brief_already_uses_is_not_naming_the_query(tmp_path):
     (run / "prompt.md").write_text("Which customers placed really large orders?")
     (run / "final_message.txt").write_text("I treated this as the TPC-H large volume customer query.")
     assert audit.exposure(run, "q18", set())["names_query"] is True
+
+
+def test_a_date_format_is_not_a_recall_marker():
+    sql = "SELECT strftime(o_orderdate, '%Y-%m') AS order_month, count(*) AS order_count FROM orders GROUP BY 1"
+    assert (
+        audit.recall_markers(sql, "Orders per month as YYYY-MM.", frozenset(), ("order_month", "order_count")) == set()
+    )
