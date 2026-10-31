@@ -1,0 +1,20 @@
+[
+ {
+  "harness": "pi",
+  "model": "xai/grok-4.5",
+  "extra_args": [
+   "--thinking",
+   "medium"
+  ],
+  "label": "pi:grok-4.5"
+ },
+ {
+  "harness": "pi",
+  "model": "xai/grok-4.7",
+  "extra_args": [
+   "--thinking",
+   "medium"
+  ],
+  "label": "pi:grok-4.7"
+ }
+]

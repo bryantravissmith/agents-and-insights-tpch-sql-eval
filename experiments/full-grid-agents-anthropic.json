@@ -1,0 +1,38 @@
+[
+ {
+  "harness": "pi",
+  "model": "anthropic/claude-haiku-5-5",
+  "extra_args": [
+   "--thinking",
+   "medium"
+  ],
+  "label": "pi:haiku-5.5"
+ },
+ {
+  "harness": "pi",
+  "model": "anthropic/claude-sonnet-5-5",
+  "extra_args": [
+   "--thinking",
+   "medium"
+  ],
+  "label": "pi:sonnet-5.5"
+ },
+ {
+  "harness": "pi",
+  "model": "anthropic/claude-opus-5-5",
+  "extra_args": [
+   "--thinking",
+   "medium"
+  ],
+  "label": "pi:opus-5.5"
+ },
+ {
+  "harness": "pi",
+  "model": "anthropic/claude-fable-5-1",
+  "extra_args": [
+   "--thinking",
+   "medium"
+  ],
+  "label": "pi:fable-5.1"
+ }
+]

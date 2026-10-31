@@ -14,7 +14,7 @@ The one rule: **never say "TPC-H" or "Q21" in a prompt.** The answer key is the 
 
 ## Novel questions (`tpch-novel/`)
 
-Six questions written for this eval on 2026-10-31, on the same database with the same shared preamble, so no model can have memorized them before that date. They are public from that date: treat later runs as post-exposure and record the run date. Each target was checked against an independently written second query (they agree exactly), and each file's `note` names the trap and how far off the tempting answer is.
+Six questions written for this eval on 2026-10-31, on the same database with the same shared preamble, so no model can have memorized them before that date. They are public from that date: treat later runs as post-exposure and record the run date. Each target was checked against an independently written second query (they agree exactly; `tests/test_second_derivations.py`), and each file's `note` names the trap and how far off the tempting answer is.
 
 | Id | Business question | Trap |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ Run them alongside the TPC-H ladder (`uv run evals.py run questions/tpch questio
 
 ## Hard novel questions (`tpch-hard/`)
 
-Six questions written on 2026-10-31 to separate the strongest models from strong ones. The difficulty is in exact multi-step reasoning, not in vagueness: the `spec` level defines everything, and the agent still has to get islands, sessions, running thresholds, an unusual percentile, a comparable partial-year window or tied ranks exactly right. Each target agrees with an independently written second query, and `tests/test_evalkit.py` checks that the tempting shortcut grades wrong.
+Six questions written on 2026-10-31 to separate the strongest models from strong ones. The difficulty is in exact multi-step reasoning, not in vagueness: the `spec` level defines everything, and the agent still has to get islands, sessions, running thresholds, an unusual percentile, a comparable partial-year window or tied ranks exactly right. Each target agrees with an independently written second query (`tests/test_second_derivations.py`), and `tests/test_evalkit.py` checks that the tempting shortcut grades wrong.
 
 | Id | Business question | What makes it hard |
 | --- | --- | --- |

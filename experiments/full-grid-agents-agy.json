@@ -1,0 +1,14 @@
+[
+ {
+  "harness": "agy",
+  "model": "gemini-3.8-flash-medium",
+  "extra_args": [],
+  "label": "agy:gemini-3.8-flash"
+ },
+ {
+  "harness": "agy",
+  "model": "gemini-4-argon-medium",
+  "extra_args": [],
+  "label": "agy:gemini-4-argon"
+ }
+]
