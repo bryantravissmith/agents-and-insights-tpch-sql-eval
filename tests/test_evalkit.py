@@ -315,7 +315,8 @@ def test_resume_can_wait_on_one_agent(sandbox, monkeypatch, db, questions_on):
         (r.run_dir / "result.json").unlink()  # both agents unfinished; only a's quota has reset
     (done,) = runner.resume("split", agents=["fake:a"], questions=[qdir], quiet=True)
     assert str(done.agent) == "fake:a"
-    assert not (sandbox / "results" / "split" / res[1].run_dir.name / "result.json").exists()
+    (waiting,) = [r for r in res if str(r.agent) == "fake:b"]  # results come back in completion order
+    assert not (waiting.run_dir / "result.json").exists()
     assert json.loads((sandbox / "results" / "split" / "manifest.json").read_text())["resumes"][0]["agents"] == [
         "fake:a"
     ]
@@ -617,3 +618,108 @@ def test_decimal_scale_sets_the_allowance():
 
     assert Num(decimal.Decimal("5.00")).places == 2 and Num(0.25).places == 2 and Num(12).places == 0
     assert cell_eq(Num(decimal.Decimal("5.00")), Num(5.004)) and not cell_eq(Num(decimal.Decimal("5.00")), Num(5.006))
+
+
+# ---------- cost: the evaluated model's own cost, at list price where the CLI has none ----------
+
+
+def _claude_transcript(tmp_path, model, basis, cost):
+    path = tmp_path / "transcript.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "result": "done",
+                "num_turns": 6,
+                "total_cost_usd": cost + 0.001196,
+                "usage": {
+                    "input_tokens": 10,
+                    "cache_read_input_tokens": 48633,
+                    "cache_creation_input_tokens": 8124,
+                    "output_tokens": 1228,
+                    "cache_creation": {"ephemeral_1h_input_tokens": 8124, "ephemeral_5m_input_tokens": 0},
+                },
+                "modelUsage": {
+                    "claude-haiku-4-5-20251001": {"inputTokens": 1111, "outputTokens": 17, "costUSD": 0.001196},
+                    model: {
+                        "inputTokens": 10,
+                        "outputTokens": 1228,
+                        "cacheReadInputTokens": 48633,
+                        "cacheCreationInputTokens": 8124,
+                        "costUSD": cost,
+                        "costBasis": basis,
+                    },
+                },
+            }
+        )
+    )
+    return path
+
+
+def test_claude_cost_is_the_evaluated_model_at_list_price_when_unknown(tmp_path):
+    from types import SimpleNamespace
+
+    h = harnesses.get("claude")
+    # As recorded on 2026-10-31: Claude Code had no price for Haiku 5.5 and reported $0.236 for this run.
+    path = _claude_transcript(tmp_path, "claude-haiku-5-5", "unknown", 0.23613825)
+    u = h.parse(SimpleNamespace(model="claude-haiku-5-5"), path)
+    expected = (10 * 0.10 + 48633 * 0.01 + 1228 * 0.50 + 8124 * 0.20) / 1e6
+    assert u.cost_usd == pytest.approx(expected) and u.extra["cost_source"] == "list price"
+    assert u.extra["harness_overhead_usd"] == 0.001196 and u.extra["reported_model_cost_usd"] == 0.23613825
+    # A model Claude Code prices itself keeps its reported cost, minus Claude Code's own side call.
+    path = _claude_transcript(tmp_path, "claude-opus-5-5", "list", 0.0718174)
+    u = h.parse(SimpleNamespace(model="claude-opus-5-5"), path)
+    assert u.cost_usd == 0.0718174 and u.extra["cost_source"] == "reported"
+
+
+# ---------- report ----------
+
+
+def test_report_leaves_provider_failures_out_and_charges_misses(tmp_path):
+    from evalkit import report
+
+    def row(task, level, verdict, correct, cost):
+        return {
+            "agent": "pi:m",
+            "harness": "pi",
+            "model": "m",
+            "task": task,
+            "level": level,
+            "verdict": verdict,
+            "correct": int(correct),
+            "lenient": int(correct),
+            "sql_source": "submit",
+            "queries_run": 4,
+            "wall_seconds": 10,
+            "tokens_in": 100,
+            "tokens_cache_read": 0,
+            "tokens_out": 50,
+            "cost_usd": cost,
+        }
+
+    rows = [
+        row("q01", "spec", "exact", True, 0.02),
+        row("q01", "spec", "rows_differ", False, 0.04),  # a miss is paid for
+        row("q01", "terse", "harness_error", False, ""),  # the provider failed: says nothing about the model
+        row("n01", "spec", "exact", True, 0.03),
+        row("n01", "spec", "exact", True, "") | {"agent": "agy:g", "harness": "agy", "model": "gemini-4-argon-medium"},
+    ]
+    rep = report.build(rows, {"q01": "tpch", "n01": "tpch-novel"})
+    c = rep["cells"][("pi:m", "all", "all")]
+    assert (c["runs"], c["excluded"], c["graded"], c["correct"]) == (4, 1, 3, 2)
+    assert c["cost"] == pytest.approx(0.03) and c["cost_per_correct"] == pytest.approx(0.045)
+    assert rep["cells"][("pi:m", "tpch", "spec")]["strict"] == 0.5
+    assert rep["cells"][("pi:m", "tpch", "terse")]["strict"] is None
+    # agy reports no cost: priced from Google's list price.
+    assert rep["cells"][("agy:g", "all", "all")]["cost"] == pytest.approx((100 * 2.00 + 50 * 10.00) / 1e6)
+    assert "list price" in rep["basis"]["agy:g"]
+    md = report.markdown(rep)
+    assert "## tpch-novel" in md and "| pi:m | 67% |" in md
+    report.write_csv(rep, tmp_path / "r.csv")
+    assert (tmp_path / "r.csv").read_text().count("\n") == len(rep["cells"]) + 1
+
+
+def test_question_sets_cover_every_question_file():
+    from evalkit import report
+
+    sets = report.question_sets()
+    assert sets["q04"] == "tpch" and sets["n01"] == "tpch-novel" and sets["h01"] == "tpch-hard"

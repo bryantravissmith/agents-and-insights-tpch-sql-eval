@@ -17,6 +17,8 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import pricing
+
 HARNESS_DIR = Path(__file__).resolve().parent.parent
 MCP_SERVER = HARNESS_DIR / "mcp_server.py"
 PI_EXTENSION = HARNESS_DIR / "extensions" / "duckdb-tools.ts"
@@ -201,6 +203,7 @@ class Claude(Harness):
     def parse(self, ctx, stdout):
         obj = _json_obj(stdout) or {}
         us = obj.get("usage") or {}
+        cost, extra = self._model_cost(ctx.model, obj)
         return Usage(
             final_text=obj.get("result") or "",
             turns=obj.get("num_turns"),
@@ -208,9 +211,44 @@ class Claude(Harness):
             tokens_out=us.get("output_tokens", 0) or 0,
             tokens_cache_read=us.get("cache_read_input_tokens", 0) or 0,
             tokens_cache_write=us.get("cache_creation_input_tokens", 0) or 0,
-            cost_usd=obj.get("total_cost_usd"),
+            cost_usd=cost,
             error=(obj.get("result") or "error")[:300] if obj.get("is_error") else "",
+            extra=extra,
         )
+
+    @staticmethod
+    def _model_cost(model: str, obj: dict) -> tuple[float | None, dict]:
+        """The evaluated model's cost, without Claude Code's own side calls (a small Haiku request every run).
+
+        Claude Code marks a model it has no price for as costBasis "unknown" and reports a wrong figure for it
+        (Claude Haiku 5.5 came out about 90x its list price), so those tokens are priced from `pricing` instead.
+        """
+        total, usage = obj.get("total_cost_usd"), obj.get("modelUsage") or {}
+        mine = usage.get(model)
+        if mine is None:
+            return total, {}
+        overhead = sum(v.get("costUSD") or 0 for k, v in usage.items() if k != model)
+        cost, source = mine.get("costUSD"), "reported"
+        if mine.get("costBasis") != "list":
+            # Claude Code writes its cache with a 1h TTL; the top-level usage says how the writes split.
+            split = (obj.get("usage") or {}).get("cache_creation") or {}
+            writes = mine.get("cacheCreationInputTokens") or 0
+            w5 = split.get("ephemeral_5m_input_tokens") or 0
+            cost = pricing.api_cost(
+                model,
+                mine.get("inputTokens") or 0,
+                mine.get("cacheReadInputTokens") or 0,
+                mine.get("outputTokens") or 0,
+                cache_write_5m=min(w5, writes),
+                cache_write_1h=writes - min(w5, writes),
+            )
+            source = "list price"
+        return cost, {
+            "cost_source": source,
+            "reported_model_cost_usd": mine.get("costUSD"),
+            "reported_total_cost_usd": total,
+            "harness_overhead_usd": round(overhead, 6),
+        }
 
 
 class Codex(Harness):

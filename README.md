@@ -31,7 +31,10 @@ uv run evals.py summary                     # latest batch; --batch <id> or --ba
 uv run evals.py progress                    # running batches: runs done, correct so far, time left
 uv run evals.py resume <batch> -j 6         # finish a stopped batch; re-run rate-limit and other provider failures
 uv run evals.py resume <batch> -a agy:gemini-3.8-flash   # only one agent, e.g. after its quota resets
+uv run evals.py report <batch> [<batch> ...] --csv report.csv   # accuracy + efficiency across batches
 ```
+
+`report` reads every current run of the batches and prints strict (and lenient) accuracy by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
 
 From Python (a notebook, a script):
 
@@ -54,8 +57,8 @@ The model id is whatever that CLI calls it. Same model, different harness, e.g. 
 | --- | --- | --- | --- | --- | --- |
 | `pi` | `pi -p --mode json` | `extensions/duckdb-tools.ts`; `--no-builtin-tools --no-extensions --no-skills --no-context-files --no-mcp` | `--append-system-prompt` | yes (pi price table) | verified |
 | `codex` | `codex exec --json --ephemeral --ignore-user-config` | MCP; shell, browser, apps, web search, image tools disabled; read-only sandbox | `AGENTS.md` in cwd | tokens only | verified |
-| `agy` | `agy -p --output-format json --project aai-evals --sandbox` | MCP via a workspace plugin; project grants allow only the two tools, deny shell/file/web | `AGENTS.md` in cwd | tokens only | verified |
-| `claude` | `claude -p --output-format json --tools ""` | MCP, `--strict-mcp-config`, `dontAsk`; `--bare` when `ANTHROPIC_API_KEY` is set, else `--setting-sources ""` | `--append-system-prompt-file` | yes (`total_cost_usd`) | verified on Sonnet 5.5 and Haiku 5.5 with API authentication |
+| `agy` | `agy -p --output-format json --project aai-evals --sandbox` | MCP via a workspace plugin; project grants allow only the two tools, deny shell/file/web | `AGENTS.md` in cwd | tokens, priced from Google's list price (`evalkit/pricing.py`) | verified |
+| `claude` | `claude -p --output-format json --tools ""` | MCP, `--strict-mcp-config`, `dontAsk`; `--bare` when `ANTHROPIC_API_KEY` is set, else `--setting-sources ""` | `--append-system-prompt-file` | the evaluated model's `modelUsage` cost, without Claude Code's own side calls; list price where Claude Code marks it `unknown` (Haiku 5.5) | verified on Sonnet 5.5 and Haiku 5.5 with API authentication |
 | `grok` | `grok -p --output-format streaming-messages-json` | MCP via trusted scratch config; built-ins removed; file/shell/web denied; compatibility discovery disabled | `AGENTS.md` in cwd | if reported | verified on 1.0.70 with Grok 4.7; native usage identifies `grok-4.7-build` |
 
 agy has no per-run MCP flag, so each run's work dir carries `.agents/plugins/audit/` and agy names the server `audit_audit`. The permission grants live in `~/.gemini/config/projects/aai-evals.json`, which evalkit writes (and rewrites if it drifts) and never touches anything else in `~/.gemini`.
@@ -189,9 +192,9 @@ as a single simultaneous experiment.
 
 `experiments/analyze_batch.py` groups by agent label and prompt level, re-executes
 answers, and reparses raw usage. SQL attempts count successful and failed
-`run_sql` executions; submissions and refusals are separate. Antigravity input
-includes cache hits and output includes thinking, so both subsets are counted only
-once. Native CLI token costs and API-equivalent estimates are not subscription
+`run_sql` executions; submissions and refusals are separate. Antigravity output
+includes thinking; its input includes cache hits for Gemini 3.8 Flash but not for
+Gemini 4 Argon, and the parser counts each only once. Native CLI token costs and API-equivalent estimates are not subscription
 invoices. Grok's native model identifier may differ from the requested catalog ID.
 
 ## License and data
