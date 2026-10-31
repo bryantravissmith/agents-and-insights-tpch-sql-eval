@@ -267,6 +267,41 @@ def test_run_grid_parallel_repeats_and_summary(sandbox, monkeypatch, db, questio
     assert any(k.startswith("db:") for k in manifest["sha256"]) and "evalkit/grading.py" in manifest["sha256"]
 
 
+def test_progress_reads_running_batches(tmp_path):
+    import os
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
+
+    def batch(name, planned, done, correct, started_min_ago, finished=False, quiet_min=0):
+        d = tmp_path / name
+        d.mkdir()
+        m = {
+            "batch": name,
+            "planned_runs": planned,
+            "created_at": (now - timedelta(minutes=started_min_ago)).isoformat(),
+        }
+        if finished:
+            m["completed_at"] = now.isoformat()
+        (d / "manifest.json").write_text(json.dumps(m))
+        for i in range(done):
+            r = d / f"run{i}"
+            r.mkdir()
+            (r / "result.json").write_text(json.dumps({"correct": i < correct}))
+            t = (now - timedelta(minutes=quiet_min)).timestamp()
+            os.utime(r / "result.json", (t, t))
+
+    batch("b-live", planned=100, done=40, correct=30, started_min_ago=10)
+    batch("b-done", planned=10, done=10, correct=9, started_min_ago=60, finished=True)
+    batch("b-stuck", planned=50, done=5, correct=5, started_min_ago=90, quiet_min=60)
+    out = runner.progress(results=tmp_path, now=now)
+    live = next(line for line in out.splitlines() if line.startswith("b-live"))
+    assert "40/100" in live and "40.0%" in live and " 30 " in live and "15 min" in live and live.endswith("running")
+    assert "b-done" not in out  # finished batches only when named
+    assert "no new run for 60 min" in out
+    assert "done" in runner.progress(["b-done"], results=tmp_path, now=now).splitlines()[1]
+
+
 def test_dry_run_and_agents_json(sandbox, monkeypatch, db, questions_on, tmp_path):
     fake = FakeHarness(Q04_BODY)
     _with_fake(monkeypatch, fake)

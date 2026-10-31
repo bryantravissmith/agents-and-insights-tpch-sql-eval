@@ -600,6 +600,40 @@ def run_grid(
 # ---------- reporting ----------
 
 
+def progress(batches: list[str] | None = None, results: Path | None = None, now: datetime | None = None) -> str:
+    """One line per batch: runs finished of planned, correct so far, pace and time left.
+
+    Reads only manifest.json and each run's result.json, so it works while the batch is running.
+    With no `batches`, shows every batch that has a manifest and has not completed.
+    """
+    results = results or RESULTS
+    now = now or datetime.now(UTC)
+    lines = [f"{'batch':42} {'done':>11} {'pct':>6} {'correct':>8} {'per min':>8} {'left':>9}  state"]
+    for manifest_path in sorted(results.glob("*/manifest.json")):
+        m = json.loads(manifest_path.read_text())
+        finished = "completed_at" in m
+        if batches and not any(b in m["batch"] for b in batches):
+            continue
+        if not batches and finished:
+            continue
+        runs = list(manifest_path.parent.glob("*/result.json"))
+        correct = sum(json.loads(p.read_text()).get("correct") in (True, 1, "1") for p in runs)
+        minutes = max((now - datetime.fromisoformat(m["created_at"])).total_seconds() / 60, 1e-9)
+        pace = len(runs) / minutes
+        newest = max((p.stat().st_mtime for p in runs), default=manifest_path.stat().st_mtime)
+        quiet_min = (now.timestamp() - newest) / 60
+        if finished:
+            left, state = "-", "done"
+        else:
+            left = f"{(m['planned_runs'] - len(runs)) / pace:.0f} min" if pace else "?"
+            state = "running" if quiet_min < 15 else f"no new run for {quiet_min:.0f} min"
+        lines.append(
+            f"{m['batch']:42} {len(runs):>5}/{m['planned_runs']:<5} {100 * len(runs) / m['planned_runs']:5.1f}% "
+            f"{correct:>8} {pace:8.1f} {left:>9}  {state}"
+        )
+    return "\n".join(lines) if len(lines) > 1 else "no unfinished batches"
+
+
 def load_scorecard(batch: str | None = None, path: Path | None = None) -> list[dict]:
     """Scorecard rows, optionally one batch ("latest" = most recent)."""
     path = path or SCORECARD

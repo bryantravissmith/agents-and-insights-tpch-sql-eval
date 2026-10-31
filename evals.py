@@ -10,6 +10,7 @@
       --agents codex:gpt-5.6-luna --repeats 5
   uv run evals.py grade my_attempt.sql --target-sql-file tpch/queries/q21.sql    # no agent, just the grader
   uv run evals.py summary [--batch latest | <batch id>]
+  uv run evals.py progress [<batch id or substring> ...]                              # while a batch runs
   uv run evals.py harnesses                                                           # what is installed
 
 Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
@@ -29,6 +30,7 @@ from evalkit import (
     grade_sql,
     load_questions,
     load_scorecard,
+    progress,
     run_grid,
     summarize,
 )
@@ -125,7 +127,13 @@ def main(argv=None) -> int:
 
     sub.add_parser("harnesses", help="which agent CLIs are on PATH")
 
+    p = sub.add_parser("progress", help="runs finished, correct so far and time left for unfinished batches")
+    p.add_argument("batches", nargs="*", help="batch ids or substrings (default: every unfinished batch)")
+
     args = ap.parse_args(argv)
+    if args.cmd == "progress":
+        print(progress(args.batches))
+        return 0
     if args.cmd == "run":
         return _grid(load_questions(*args.questions, levels=args.levels), args)
     if args.cmd == "ask":
