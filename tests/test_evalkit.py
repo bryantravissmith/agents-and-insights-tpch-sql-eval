@@ -306,6 +306,23 @@ def test_resume_reruns_provider_failures_and_unfinished_runs(sandbox, monkeypatc
     assert runner.resume("flaky", jobs=1, questions=[qdir], quiet=True) == []
 
 
+def test_resume_can_wait_on_one_agent(sandbox, monkeypatch, db, questions_on):
+    _with_fake(monkeypatch, FakeHarness(Q04_BODY + "ORDER BY 1"))
+    qdir = questions_on(db, "q04")
+    tasks = load_question(qdir / "q04.toml", ["spec"])
+    res = runner.run_grid(tasks, ["fake:a", "fake:b"], batch="split", quiet=True)
+    for r in res:
+        (r.run_dir / "result.json").unlink()  # both agents unfinished; only a's quota has reset
+    (done,) = runner.resume("split", agents=["fake:a"], questions=[qdir], quiet=True)
+    assert str(done.agent) == "fake:a"
+    assert not (sandbox / "results" / "split" / res[1].run_dir.name / "result.json").exists()
+    assert json.loads((sandbox / "results" / "split" / "manifest.json").read_text())["resumes"][0]["agents"] == [
+        "fake:a"
+    ]
+    with pytest.raises(ValueError, match="not in batch"):
+        runner.resume("split", agents=["fake:c"], questions=[qdir], quiet=True)
+
+
 class CutShortHarness(FakeHarness):
     """Runs (and maybe submits) like FakeHarness, then reports the provider error a session ends on."""
 

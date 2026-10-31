@@ -571,9 +571,12 @@ def resume(
     jobs: int = 4,
     harness_jobs: dict[str, int] | None = None,
     questions: list[Path] | None = None,
+    agents: list[str] | None = None,
     quiet: bool = False,
 ) -> list[RunResult]:
     """Finish a batch: run the planned runs that never ran or that failed on the provider's side.
+
+    `agents` limits the re-runs to those agent labels (e.g. one whose quota has reset); the rest wait.
 
     The plan comes from the batch's manifest, and every task's composed prompt must still hash to what the
     batch ran (questions edited since then are refused). A replaced attempt moves to `_replaced/` and the
@@ -592,16 +595,21 @@ def resume(
                 f"{spec['id']}/{spec['level']}: prompt changed or missing since the batch ran; start a new batch"
             )
         tasks.append(t)
-    agents = [Agent(a["harness"], a["model"], tuple(a["extra_args"]), a.get("label")) for a in manifest["agents"]]
+    planned = [Agent(a["harness"], a["model"], tuple(a["extra_args"]), a.get("label")) for a in manifest["agents"]]
+    unknown = set(agents or ()) - {str(a) for a in planned}
+    if unknown:
+        raise ValueError(f"not in batch {batch}: {sorted(unknown)}; it ran {[str(a) for a in planned]}")
     conditions, repeats = manifest["conditions"], manifest["repeats"]
     run_kw = {
         k: v for k, v in manifest["run_options"].items() if k in ("timeout_s", "max_turns", "keep_work", "record")
     }
-    plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in agents]
+    plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in planned]
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     todo, missing, provider = [], 0, Counter()
     for p in plan:
+        if agents and str(p[1]) not in agents:
+            continue
         run_dir = batch_dir / _run_name(*p)
         result = run_dir / "result.json"
         if result.exists():
@@ -641,6 +649,7 @@ def resume(
             "git": _git_state(),
             "rerun_never_finished": missing,
             "rerun_provider_failures": dict(provider),
+            "agents": agents or "all",
             "jobs": jobs,
             "elapsed_seconds": round(time.monotonic() - started, 1),
             "replaced_attempts_in": "_replaced/",

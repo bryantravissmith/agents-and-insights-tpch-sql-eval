@@ -10,8 +10,6 @@ Writes:
   out/answers/sf0.1/q01.csv ...    validated answers (pipe-delimited as DuckDB ships them)
 Also runs each query at SF=0.1 and reports whether the live result matches the shipped answer.
 """
-import csv
-import io
 import os
 import sys
 
@@ -149,7 +147,8 @@ def main():
 
 def _norm(v):
     """Normalize a live cell for comparison: numbers -> rounded float, dates -> ISO, else str."""
-    import decimal, datetime
+    import datetime
+    import decimal
     if v is None:
         return "NULL"
     if isinstance(v, (int, float, decimal.Decimal)):

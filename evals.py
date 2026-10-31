@@ -12,6 +12,7 @@
   uv run evals.py summary [--batch latest | <batch id>]
   uv run evals.py progress [<batch id or substring> ...]                              # while a batch runs
   uv run evals.py resume <batch id> -j 6                                             # re-run unfinished and provider-failed runs
+  uv run evals.py resume <batch id> -a agy:gemini-3.8-flash                         # only one agent's runs
   uv run evals.py harnesses                                                           # what is installed
 
 Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
@@ -135,6 +136,7 @@ def main(argv=None) -> int:
     p.add_argument("batch", help="batch id (the folder name under results/)")
     p.add_argument("--jobs", "-j", type=int, default=4, help="parallel runs (default 4)")
     p.add_argument("--harness-jobs", nargs="*", default=[], metavar="HARNESS=N", help="per-CLI cap, e.g. agy=2")
+    p.add_argument("--agents", "-a", nargs="+", help="only re-run these agents (labels as the batch recorded them)")
 
     p = sub.add_parser("reparse", help="recompute turns, tokens and cost from saved transcripts (after a parser fix)")
     p.add_argument("batch", help="batch id (the folder name under results/)")
@@ -145,7 +147,7 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "resume":
         caps = {k: int(v) for k, v in (s.split("=", 1) for s in args.harness_jobs)}
-        resume(args.batch, jobs=args.jobs, harness_jobs=caps)
+        resume(args.batch, jobs=args.jobs, harness_jobs=caps, agents=args.agents)
         return 0
     if args.cmd == "progress":
         print(progress(args.batches))

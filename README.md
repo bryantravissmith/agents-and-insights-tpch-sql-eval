@@ -30,6 +30,7 @@ uv run evals.py grade attempt.sql --target-sql-file tpch/queries/q21.sql   # gra
 uv run evals.py summary                     # latest batch; --batch <id> or --batch all
 uv run evals.py progress                    # running batches: runs done, correct so far, time left
 uv run evals.py resume <batch> -j 6         # finish a stopped batch; re-run rate-limit and other provider failures
+uv run evals.py resume <batch> -a agy:gemini-3.8-flash   # only one agent, e.g. after its quota resets
 ```
 
 From Python (a notebook, a script):
