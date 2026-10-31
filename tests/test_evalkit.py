@@ -334,6 +334,30 @@ def test_novel_questions_share_the_preamble_and_catch_their_traps(db):
     assert not grade_sql(buyers_only, tasks["n05"].target_sql, db).correct
 
 
+def test_hard_questions_reject_their_shortcuts(db):
+    if db.resolve() != runner.DB.resolve():
+        pytest.skip("hard questions point at the real tpch.duckdb")
+    tasks = {t.id: t for t in load_questions(HERE / "questions" / "tpch-hard", levels=["spec"])}
+    assert sorted(tasks) == [f"h0{i}" for i in range(1, 7)]
+    for t in tasks.values():
+        t.check_leaks()
+        assert grade_sql(t.target_sql, t.target_sql, db).verdict == "exact"
+    shortcuts = {
+        "h02": tasks["h02"].target_sql.replace("o_orderdate - prev > 30", "o_orderdate - prev >= 30"),
+        "h04": tasks["h04"].target_sql.replace(
+            "  GROUP BY o_orderkey, o_custkey\n  HAVING count(*) FILTER (WHERE l_returnflag = 'R') = 0)",
+            "    AND l_returnflag <> 'R'\n  GROUP BY o_orderkey, o_custkey)",
+        ),
+        "h05": tasks["h05"].target_sql.replace(
+            "  WHERE (month(o_orderdate) < 8 OR (month(o_orderdate) = 8 AND day(o_orderdate) <= 2))\n", ""
+        ),
+        "h06": tasks["h06"].target_sql.replace("rank() OVER", "dense_rank() OVER"),
+    }
+    for qid, sql in shortcuts.items():
+        assert sql != tasks[qid].target_sql, qid
+        assert not grade_sql(sql, tasks[qid].target_sql, db).correct, qid
+
+
 def test_preamble_prefixes_each_level_unless_raw(tmp_path, tiny_db):
     qdir = tmp_path / "questions" / "pets"
     qdir.mkdir(parents=True)

@@ -1,0 +1,48 @@
+id = "h02"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31. Sessionization. Traps: measuring the 30-day gap from the first order of the spree rather than the previous order; using >= 30 instead of > 30; letting orders outside 1996-1997 start or extend sprees."
+target_sql = '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (
+  SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 30 THEN 1 ELSE 0 END AS new_spree FROM o),
+s AS (
+  SELECT *, sum(new_spree) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey ROWS UNBOUNDED PRECEDING) AS spree FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, spree, count(*) AS n FROM s GROUP BY ALL)
+SELECT c_mktsegment AS segment, count(*) AS sprees, count(*) FILTER (WHERE n >= 3) AS sprees_3_plus,
+       avg(n) AS avg_orders_per_spree
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many buying sprees did each market segment have in 1996-97? A spree is orders close together.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+We think customers buy in bursts. Looking only at orders placed in 1996 and 1997, group each customer's orders into buying sprees: a customer's orders belong to the same spree as long as each order comes no more than 30 days after that customer's previous order; a gap of more than 30 days starts a new spree. For each market segment, tell me how many sprees there were, how many had at least 3 orders, and the average number of orders per spree.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the growth team:
+
+> Consider only orders with order date on or after 1996-01-01 and before 1998-01-01. For each customer, sort these orders by order date, then order key. The first order starts a spree. Each later order starts a new spree if its order date is more than 30 days after the order date of the immediately preceding order of that customer; otherwise it belongs to the current spree. Orders on the same day are 0 days apart. For each customer market segment, return the number of sprees, the number of sprees containing at least 3 orders, and the average number of orders per spree.
+
+Requirements:
+
+- The gap is measured from the previous order, not from the first order of the spree. Exactly 30 days apart stays in the same spree.
+- Orders outside the date range neither start nor extend sprees.
+- Do not round the average.
+- Return exactly four columns, in this order: segment, spree count, sprees with at least 3 orders, average orders per spree. Sort by segment.
+'''

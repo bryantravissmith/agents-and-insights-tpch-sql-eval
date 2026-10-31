@@ -1,0 +1,52 @@
+id = "h04"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31. Exclusive-method percentile (Excel PERCENTILE.EXC), which no DuckDB built-in computes, over whole orders. Traps: quantile_cont (the inclusive method); dropping only the returned line items instead of the whole order. Choosing 1994 matters: TPC-H only marks items returned before mid-1995, so a later year makes the exclusion vacuous."
+target_sql = '''
+WITH ord AS (
+  SELECT o_orderkey, o_custkey, sum(l_extendedprice * (1 - l_discount)) AS revenue
+  FROM orders JOIN lineitem ON l_orderkey = o_orderkey
+  WHERE o_orderdate >= DATE '1994-01-01' AND o_orderdate < DATE '1995-01-01'
+  GROUP BY o_orderkey, o_custkey
+  HAVING count(*) FILTER (WHERE l_returnflag = 'R') = 0),
+x AS (
+  SELECT r_name, revenue::DOUBLE AS revenue,
+         row_number() OVER (PARTITION BY r_name ORDER BY revenue) AS pos,
+         count(*) OVER (PARTITION BY r_name) AS n
+  FROM ord JOIN customer ON c_custkey = o_custkey
+  JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey),
+h AS (SELECT DISTINCT r_name, n, 0.9 * (n + 1) AS h FROM x)
+SELECT h.r_name AS region, h.n AS orders,
+       lo.revenue + (h.h - floor(h.h)) * (hi.revenue - lo.revenue) AS p90_order_revenue
+FROM h
+JOIN x lo ON lo.r_name = h.r_name AND lo.pos = floor(h.h)
+JOIN x hi ON hi.r_name = h.r_name AND hi.pos = floor(h.h) + 1
+ORDER BY region
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+What's the 90th percentile order size by region for 1994, leaving out orders with returns? Use the exclusive percentile.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For a pricing review I need the 90th percentile of order size by customer region, for orders placed in 1994. Order size is the order's revenue: price after discount summed over its items. Leave out any order that had at least one returned item, the whole order, not just the returned items. Compute the percentile the way Excel's PERCENTILE.EXC does. Show region, the number of orders included, and the percentile.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the pricing team:
+
+> Consider orders with order date on or after 1994-01-01 and before 1995-01-01 that have no line item with return flag 'R'. An order's revenue is the sum over its line items of extended price times (1 - discount). Group orders by the region of the customer's nation. Within each region, sort the n order revenues ascending as x(1) <= ... <= x(n) and compute the 90th percentile with the exclusive method: h = 0.9 * (n + 1); the result is x(floor(h)) + (h - floor(h)) * (x(floor(h) + 1) - x(floor(h))). Return the region name, n, and the percentile. Sort by region name.
+
+Requirements:
+
+- An order with any returned line item is excluded entirely.
+- This is not the inclusive (linear, PERCENTILE.CONT) or nearest-rank percentile.
+- Do not round the percentile.
+- Return exactly three columns, in this order: region, order count, 90th percentile revenue.
+'''

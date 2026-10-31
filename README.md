@@ -6,6 +6,7 @@ What is in the box:
 
 - `questions/tpch/`: the 22 TPC-H questions rewritten in business English, each at three levels, with the shared tool instructions in `preamble.md`.
 - `questions/tpch-novel/`: six questions written for this eval (first published 2026-10-31), each built around a common analytics trap. TPC-H is in every model's training data; these are the control.
+- `questions/tpch-hard/`: six harder novel questions (first published 2026-10-31) meant to separate the strongest models: gaps and islands, sessionization, running thresholds, an exclusive percentile, a comparable partial-year window, tied ranks.
 - `tpch/`: the 22 reference queries and their validated answers at scale factor 0.1, extracted from DuckDB's `tpch` extension (`tpch/extract_tpch.py`).
 - `evalkit/`, `evals.py`: the runner, the harness adapters and the execution grader. `sqlguard.py`, `mcp_server.py`, `extensions/duckdb-tools.ts`: the two read-only tools every agent gets.
 

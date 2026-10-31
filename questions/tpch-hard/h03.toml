@@ -1,0 +1,50 @@
+id = "h03"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31. Pareto threshold per nation with running sums. Traps: counting every customer of the nation rather than those with 1995 revenue; stopping one customer short of half; ordering ties nondeterministically."
+target_sql = '''
+WITH rev AS (
+  SELECT c_nationkey, c_custkey, sum(l_extendedprice * (1 - l_discount)) AS revenue
+  FROM customer JOIN orders ON o_custkey = c_custkey JOIN lineitem ON l_orderkey = o_orderkey
+  WHERE o_orderdate >= DATE '1995-01-01' AND o_orderdate < DATE '1996-01-01'
+  GROUP BY c_nationkey, c_custkey),
+r AS (
+  SELECT *, sum(revenue) OVER (PARTITION BY c_nationkey) AS total,
+         sum(revenue) OVER (PARTITION BY c_nationkey ORDER BY revenue DESC, c_custkey ROWS UNBOUNDED PRECEDING) AS cum,
+         row_number() OVER (PARTITION BY c_nationkey ORDER BY revenue DESC, c_custkey) AS k,
+         count(*) OVER (PARTITION BY c_nationkey) AS customers
+  FROM rev),
+first_over AS (
+  SELECT c_nationkey, min(k) AS k FROM r WHERE cum * 2 >= total GROUP BY c_nationkey)
+SELECT n_name AS nation, r.customers, r.k AS customers_for_half, r.cum / r.total AS share_covered
+FROM first_over f
+JOIN r ON r.c_nationkey = f.c_nationkey AND r.k = f.k
+JOIN nation ON n_nationkey = f.c_nationkey
+ORDER BY nation
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+In each country, how few customers make up half our 1995 revenue?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I want to see how concentrated revenue is by country. For each customer country, look at customers' revenue on orders placed in 1995 (price after discount). Ranking customers from biggest to smallest, what is the smallest number of top customers that together bring in at least half of that country's 1995 revenue, and what share of the country's revenue do they actually cover? Also show how many customers in that country had any 1995 revenue.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the finance team:
+
+> For each nation (the customer's nation), consider customers with at least one order with order date on or after 1995-01-01 and before 1996-01-01. A customer's revenue is the sum over line items of those orders of extended price times (1 - discount). Rank the nation's customers by revenue descending, ties broken by customer key ascending. Find the smallest k such that the combined revenue of the top k customers is at least half of the nation's total. Return the nation name, the number of customers with 1995 revenue in that nation, k, and the share of the nation's total revenue covered by the top k (a fraction between 0 and 1). Sort by nation name.
+
+Requirements:
+
+- "At least half" means greater than or equal to 50%.
+- Do not round the share.
+- Return exactly four columns, in this order: nation, customers, k, share covered.
+'''

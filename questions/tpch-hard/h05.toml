@@ -1,0 +1,42 @@
+id = "h05"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31. The data ends 1998-08-02, so a fair year-over-year comparison uses the same Jan 1 to Aug 2 window every year. Traps: full calendar years (1998 looks like a collapse); 1993's change left NULL because 1992 was filtered out before the LAG; the agent must discover the last order date itself at the terse rung."
+target_sql = '''
+WITH a AS (
+  SELECT r_name, year(o_orderdate) AS yr, count(DISTINCT o_custkey) AS active
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey
+  WHERE (month(o_orderdate) < 8 OR (month(o_orderdate) = 8 AND day(o_orderdate) <= 2))
+  GROUP BY r_name, yr)
+SELECT r_name AS region, yr AS year, active,
+       active - lag(active) OVER (PARTITION BY r_name ORDER BY yr) AS change
+FROM a
+QUALIFY yr >= 1993
+ORDER BY region, year
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+Active customers by region, year over year, 1993 to 1998. Make sure 1998 is comparable.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I need a fair year-over-year view of active customers by region (the customer's region), 1993 through 1998. Our data stops partway through 1998, so compare every year over the same window: January 1 through the last order date in the data. A customer is active in a year if they placed an order in that year's window. For each region and year, show the active count and the change from the previous year; 1993 should be compared with 1992, not left blank.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the strategy team:
+
+> The latest order date in the data is 1998-08-02. For each year Y from 1993 through 1998 and each region (of the customer's nation), count the distinct customers with at least one order whose order date falls between January 1 and August 2 of year Y, inclusive. Also compute the change from year Y - 1 using the same January 1 to August 2 window (for 1993, compare with the 1992 window). Sort by region name, then year.
+
+Requirements:
+
+- Every year uses the January 1 to August 2 window, including the comparison year.
+- Return exactly four columns, in this order: region, year, active customers, change from the previous year.
+'''

@@ -26,3 +26,16 @@ Six questions written for this eval on 2026-10-31, on the same database with the
 | n06 | 1994 first-order cohort returning within 90 days, by segment | "First order" means first ever; the window is per customer |
 
 Run them alongside the TPC-H ladder (`uv run evals.py run questions/tpch questions/tpch-novel ...`). The gap between memorized and novel questions is itself a result.
+
+## Hard novel questions (`tpch-hard/`)
+
+Six questions written on 2026-10-31 to separate the strongest models from strong ones. The difficulty is in exact multi-step reasoning, not in vagueness: the `spec` level defines everything, and the agent still has to get islands, sessions, running thresholds, an unusual percentile, a comparable partial-year window or tied ranks exactly right. Each target agrees with an independently written second query, and `tests/test_evalkit.py` checks that the tempting shortcut grades wrong. Their difficulty is not yet calibrated: run the frontier models on the `spec` level before calling any of them hard.
+
+| Id | Business question | What makes it hard |
+| --- | --- | --- |
+| h01 | Distribution of customers' longest streak of consecutive ordering months | Gaps and islands over calendar months across year boundaries |
+| h02 | Buying sprees per segment, 1996-1997 (new spree after a gap of more than 30 days) | Sessionization: gap from the previous order, not the spree start; window edges |
+| h03 | Fewest customers making up at least half of each nation's 1995 revenue | Running sum with deterministic ties; which customers count |
+| h04 | 90th percentile order revenue by region, 1994, orders with no returns, exclusive method | No built-in computes PERCENTILE.EXC; whole-order exclusion; returns only exist before mid-1995 |
+| h05 | Year-over-year active customers by region on a Jan 1 to Aug 2 window | The data ends 1998-08-02; 1993's change needs 1992 |
+| h06 | Five largest within-nation on-time rank improvements, 1995 to 1996 | Competition ranking with ties, per nation, per ship year |
