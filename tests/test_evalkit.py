@@ -338,6 +338,27 @@ def test_resume_reruns_runs_graded_after_a_provider_cut(sandbox, monkeypatch, db
     assert json.loads((r.run_dir / "result.json").read_text())["verdict"] == "exact"
 
 
+def test_reparse_fixes_agy_usage_from_the_transcript(sandbox):
+    run = sandbox / "results" / "agyb" / "q01-spec-bare-agy-gemini-4-argon-r1"
+    run.mkdir(parents=True)
+    usage = {"input_tokens": 20580, "cache_read_tokens": 36109, "output_tokens": 1479, "total_tokens": 22059}
+    (run / "transcript.jsonl").write_text(
+        json.dumps({"status": "SUCCESS", "response": "done", "num_turns": 1, "usage": usage})
+    )
+    # As recorded by the old parser: cache subtracted from an input count that never included it.
+    (run / "result.json").write_text(
+        json.dumps(
+            {"harness": "agy", "model": "gemini-4-argon-medium", "verdict": "exact", "tokens_in": -15529, "turns": 1}
+        )
+    )
+    (run.parent / "manifest.json").write_text(json.dumps({"batch": "agyb"}))
+    assert runner.reparse("agyb", quiet=True) == 1
+    row = json.loads((run / "result.json").read_text())
+    assert (row["tokens_in"], row["tokens_cache_read"], row["turns"], row["verdict"]) == (20580, 36109, "", "exact")
+    assert row["usage_extra"]["reported_total_tokens"] == 22059
+    assert json.loads((run.parent / "manifest.json").read_text())["reparsed"][0]["runs"] == 1
+
+
 def test_resume_refuses_edited_prompts(sandbox, monkeypatch, db, questions_on):
     _with_fake(monkeypatch, FakeHarness(Q04_BODY + "ORDER BY 1"))
     qdir = questions_on(db, "q04")

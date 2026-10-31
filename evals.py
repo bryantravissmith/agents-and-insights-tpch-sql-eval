@@ -35,7 +35,7 @@ from evalkit import (
     run_grid,
     summarize,
 )
-from evalkit.runner import DB, new_batch_id, resume
+from evalkit.runner import DB, new_batch_id, reparse, resume
 
 
 def _grid_args(p: argparse.ArgumentParser):
@@ -136,7 +136,13 @@ def main(argv=None) -> int:
     p.add_argument("--jobs", "-j", type=int, default=4, help="parallel runs (default 4)")
     p.add_argument("--harness-jobs", nargs="*", default=[], metavar="HARNESS=N", help="per-CLI cap, e.g. agy=2")
 
+    p = sub.add_parser("reparse", help="recompute turns, tokens and cost from saved transcripts (after a parser fix)")
+    p.add_argument("batch", help="batch id (the folder name under results/)")
+
     args = ap.parse_args(argv)
+    if args.cmd == "reparse":
+        reparse(args.batch)
+        return 0
     if args.cmd == "resume":
         caps = {k: int(v) for k, v in (s.split("=", 1) for s in args.harness_jobs)}
         resume(args.batch, jobs=args.jobs, harness_jobs=caps)

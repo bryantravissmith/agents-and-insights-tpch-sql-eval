@@ -643,6 +643,48 @@ def resume(
     return results
 
 
+def reparse(batch: str, *, quiet: bool = False) -> int:
+    """Recompute each run's usage fields (turns, tokens, cost) from its saved transcript with the current parsers.
+
+    For fixing a parser after the fact. Verdicts, grades and error text are left as recorded; the manifest's
+    `reparsed` list says when and with which commit. Returns the number of runs updated.
+    """
+    from types import SimpleNamespace
+
+    batch_dir = RESULTS / batch
+    updated = 0
+    for result in sorted(batch_dir.glob("*/result.json")):
+        run_dir = result.parent
+        transcript = run_dir / "transcript.jsonl"
+        row = json.loads(result.read_text())
+        if not transcript.exists() or not row.get("harness"):
+            continue
+        u = harnesses.get(row["harness"]).parse(SimpleNamespace(run_dir=run_dir, model=row.get("model")), transcript)
+        row |= {
+            "turns": "" if u.turns is None else u.turns,
+            "tokens_in": u.tokens_in,
+            "tokens_out": u.tokens_out,
+            "tokens_cache_read": u.tokens_cache_read,
+            "tokens_cache_write": u.tokens_cache_write,
+            "cost_usd": "" if u.cost_usd is None else f"{u.cost_usd:.4f}",
+            "usage_extra": u.extra,
+        }
+        result.write_text(json.dumps(row, indent=2))
+        updated += 1
+    if (batch_dir / "results.jsonl").exists():
+        rows = [json.loads(p.read_text()) for p in sorted(batch_dir.glob("*/result.json"))]
+        with open(batch_dir / "results.jsonl", "w") as f:
+            f.writelines(json.dumps({k: row.get(k, "") for k in COLS}) + "\n" for row in rows)
+    manifest = json.loads((batch_dir / "manifest.json").read_text())
+    manifest.setdefault("reparsed", []).append(
+        {"at": datetime.now(UTC).isoformat(timespec="seconds"), "git": _git_state(), "runs": updated}
+    )
+    write_manifest(batch_dir, manifest)
+    if not quiet:
+        print(f"batch {batch}: re-parsed usage for {updated} runs")
+    return updated
+
+
 def run_grid(
     tasks: list[Task],
     agents: list[Agent | str],

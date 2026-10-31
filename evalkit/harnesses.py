@@ -331,12 +331,18 @@ class Grok(Harness):
             "MCPTool(audit__run_sql)",
             "--allow",
             "MCPTool(audit__submit_sql)",
-            "--deny", "Read",
-            "--deny", "Bash",
-            "--deny", "Write",
-            "--deny", "Edit",
-            "--deny", "Grep",
-            "--deny", "WebFetch",
+            "--deny",
+            "Read",
+            "--deny",
+            "Bash",
+            "--deny",
+            "Write",
+            "--deny",
+            "Edit",
+            "--deny",
+            "Grep",
+            "--deny",
+            "WebFetch",
             "--max-turns",
             str(ctx.max_turns),
             *ctx.extra_args,
@@ -363,7 +369,8 @@ class Grok(Harness):
             tokens_cache_write=us.get("cache_creation_input_tokens", 0) or 0,
             cost_usd=None if obj.get("cost_is_partial") else obj.get("total_cost_usd"),
             error=(obj.get("message") or obj.get("result") or "error")[:300]
-                  if obj.get("type") == "error" or obj.get("is_error") else "",
+            if obj.get("type") == "error" or obj.get("is_error")
+            else "",
             extra={k: obj[k] for k in ("modelUsage", "cost_is_partial", "usage_is_incomplete") if k in obj},
         )
 
@@ -440,14 +447,24 @@ class Antigravity(Harness):
         obj = _json_obj(stdout) or {}
         us = obj.get("usage") or {}
         denied = [d.get("action", "") + ":" + d.get("display_name", "") for d in obj.get("denied_actions") or []]
+        # input + output == total in every observed run. Cache reads are usually a subset of input (the CLI's
+        # documented example; Gemini 3.8 Flash), but Gemini 4 Argon reports more cache reads than input, so
+        # there they are separate. Subtract only when the cache fits inside input; raw counts stay in extra.
+        # agy reports num_turns = 1 for every run, so turns are not comparable; use queries_run for effort.
+        raw_in, cache = us.get("input_tokens", 0) or 0, us.get("cache_read_tokens", 0) or 0
         u = Usage(
             final_text=obj.get("response") or "",
-            turns=obj.get("num_turns"),
-            tokens_in=(us.get("input_tokens", 0) or 0) - (us.get("cache_read_tokens", 0) or 0),
+            turns=None,
+            tokens_in=raw_in - cache if cache <= raw_in else raw_in,
             tokens_out=us.get("output_tokens", 0) or 0,
-            tokens_cache_read=us.get("cache_read_tokens", 0) or 0,
-            extra={"denied_actions": denied, "thinking_tokens_in_output": us.get("thinking_tokens", 0),
-                   "reported_total_tokens": us.get("total_tokens")},
+            tokens_cache_read=cache,
+            extra={
+                "denied_actions": denied,
+                "thinking_tokens_in_output": us.get("thinking_tokens", 0),
+                "reported_input_tokens": raw_in,
+                "reported_total_tokens": us.get("total_tokens"),
+                "reported_num_turns": obj.get("num_turns"),
+            },
         )
         if obj and obj.get("status") != "SUCCESS":
             u.error = f"status={obj.get('status')}"
