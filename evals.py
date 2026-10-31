@@ -14,6 +14,7 @@
   uv run evals.py resume <batch id> -j 6                                             # re-run unfinished and provider-failed runs
   uv run evals.py resume <batch id> -a agy:gemini-3.8-flash                         # only one agent's runs
   uv run evals.py report <batch id> [<batch id> ...] --csv report.csv                   # accuracy + efficiency
+  uv run evals.py audit <batch id> [<batch id> ...] --out audit/                        # cheating + prior exposure
   uv run evals.py harnesses                                                           # what is installed
 
 Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
@@ -30,6 +31,7 @@ from evalkit import (
     HARNESSES,
     Agent,
     Task,
+    audit,
     grade_sql,
     load_questions,
     load_scorecard,
@@ -144,6 +146,11 @@ def main(argv=None) -> int:
     p.add_argument("batches", nargs="+", help="batch ids (folder names under results/)")
     p.add_argument("--csv", type=Path, help="also write every cell as CSV")
 
+    p = sub.add_parser("audit", help="cheating attempts and signs of prior exposure, with evidence, across batches")
+    p.add_argument("batches", nargs="+", help="batch ids (folder names under results/)")
+    p.add_argument("--out", type=Path, required=True, help="folder for summary.md, flagged.md, runs.jsonl, markers.json")
+    _db_arg(p)
+
     p = sub.add_parser("reparse", help="recompute turns, tokens and cost from saved transcripts (after a parser fix)")
     p.add_argument("batch", help="batch id (the folder name under results/)")
 
@@ -153,6 +160,10 @@ def main(argv=None) -> int:
         print(report.markdown(rep))
         if args.csv:
             report.write_csv(rep, args.csv)
+        return 0
+    if args.cmd == "audit":
+        done = audit.run_audit(args.batches, args.out, db=args.db)
+        print(f"audited {done['runs']} runs; see {done['out_dir']}/summary.md and flagged.md")
         return 0
     if args.cmd == "reparse":
         reparse(args.batch)

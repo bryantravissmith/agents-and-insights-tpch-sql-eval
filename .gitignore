@@ -6,3 +6,4 @@ results/scorecard.csv
 __pycache__/
 .DS_Store
 *.duckdb.tmp/
+results/*.csv

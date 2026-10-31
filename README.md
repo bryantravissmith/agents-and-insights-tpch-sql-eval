@@ -36,6 +36,13 @@ uv run evals.py report <batch> [<batch> ...] --csv report.csv   # accuracy + eff
 
 `report` reads every current run of the batches and prints strict (and lenient) accuracy by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
 
+`audit` reads the same runs for two things a score does not show, and writes the evidence for review: `summary.md` (rates by agent and question set), `flagged.md` (every flagged run with the SQL or message that triggered it), `runs.jsonl` (every signal for every run) and `markers.json` (what counts as recall for each question and level). The rules are in `evalkit/audit.py`.
+
+- **Cheating attempts**, from every `run_sql` call in `queries.log`, refused ones included: reaching for the answer key (DuckDB's `tpch_queries()`, `tpch_answers()`, `PRAGMA tpch`, `dbgen`), reading files or attaching databases, probing the engine (`duckdb_extensions()`, `SET`, `INSTALL`), and tool calls the CLI denied. A `got through` column counts attempts that ran.
+- **Prior exposure**: naming TPC-H or the specific query in the final message (or asking the engine for it by number), and reproducing details of the reference query that the brief at that level leaves out and the data does not reveal (TPC-H's output names such as `numwait` and `custdist`, constants such as q22's country codes or q21's `LIMIT 100`). The novel questions, written after the models were trained, run through the same detector as the control.
+
+`experiments/full-grid-2026-10-31.sh` runs `reparse`, `report` and `audit` over the 2026-10-31 batches in one go.
+
 From Python (a notebook, a script):
 
 ```python
