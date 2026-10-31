@@ -1,0 +1,29 @@
+id = "q12"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q12.sql"
+note = "Shipping modes and order priority. Two CASE/SUM columns; three date predicates; counts line items, not orders."
+
+[[levels]]
+name = "terse"
+prompt = '''
+In 1994, were late deliveries by mail or by ship hitting our high-priority orders?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Logistics wants to know whether ship mode affects late deliveries of important orders. For MAIL and SHIP line items received in 1994 that were shipped before their committed date but still arrived after it, count the line items on high-priority orders (1-URGENT or 2-HIGH) and the line items on all other orders, per ship mode.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the logistics team:
+
+> Consider line items with ship mode 'MAIL' or 'SHIP', received on or after 1994-01-01 and before 1995-01-01, whose ship date is before the commit date and whose receipt date is after the commit date. For each ship mode, count the line items whose order priority is '1-URGENT' or '2-HIGH', and separately count the line items with any other priority. Sort by ship mode.
+
+Requirements:
+
+- Count line items, not orders.
+- Return exactly three columns, in this order: ship mode, high-priority count, other-priority count.
+'''

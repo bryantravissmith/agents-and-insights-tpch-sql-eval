@@ -1,0 +1,587 @@
+"""Run agents on tasks, grade every run, record it. run_one is a single attempt; run_grid fans out in parallel.
+
+Layout of one run (results/<batch>/<task>-<level>-<condition>-<harness>-<model>-r<n>/):
+  prompt.md  meta.json  transcript.jsonl  stderr.log  queries.log  answer.sql  final_message.txt  result.json
+The agent's cwd is an anonymous scratch dir outside the repo (AAI_WORK_ROOT, default $TMPDIR/aai-evals).
+This prevents ancestor context discovery; disabled tools and DuckDB restrictions enforce answer-key isolation.
+It is deleted after the run unless keep_work=True.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import os
+import re
+import shutil
+import signal
+import statistics
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import uuid
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+
+from . import grading, harnesses
+from .harnesses import HARNESS_DIR, RunContext
+from .tasks import Task
+
+RESULTS = HARNESS_DIR / "results"
+SCORECARD = RESULTS / "scorecard.csv"
+CONDITIONS = HARNESS_DIR / "conditions"
+DB = HARNESS_DIR / "tpch.duckdb"
+# The enclosing git checkout (the harness may sit at its root or deeper); agents must work outside it.
+REPO_ROOT = next((p for p in (HARNESS_DIR, *HARNESS_DIR.parents) if (p / ".git").exists()), HARNESS_DIR)
+WORK_ROOT = Path(os.environ.get("AAI_WORK_ROOT") or tempfile.gettempdir()) / "aai-evals"
+
+COLS = [
+    "batch",
+    "started_at",
+    "task",
+    "level",
+    "rank",
+    "condition",
+    "harness",
+    "model",
+    "agent",
+    "repeat",
+    "verdict",
+    "correct",
+    "lenient",
+    "sql_source",
+    "rows_returned",
+    "rows_expected",
+    "queries_run",
+    "submits",
+    "wall_seconds",
+    "exit_code",
+    "turns",
+    "tokens_in",
+    "tokens_out",
+    "tokens_cache_read",
+    "tokens_cache_write",
+    "cost_usd",
+    "error",
+    "prompt_sha",
+    "run_dir",
+]
+
+_scorecard_lock = threading.Lock()
+_LOG_HEAD = re.compile(r"^-- \d{4}-\d{2}-\d{2}T\S+ (\S+)")
+
+
+@dataclass(frozen=True)
+class Agent:
+    """A model inside a harness. Spec strings are "harness:model", e.g. "codex:gpt-5.6-luna",
+    "pi:openai/gpt-5.6-luna", "agy:claude-sonnet-5-5-medium". extra_args go to the CLI verbatim."""
+
+    harness: str
+    model: str
+    extra_args: tuple[str, ...] = ()
+    label: str | None = None
+
+    @classmethod
+    def parse(cls, spec: str | Agent) -> Agent:
+        if isinstance(spec, Agent):
+            return spec
+        harness, sep, model = spec.partition(":")
+        if not sep or not model:
+            raise ValueError(f"agent spec {spec!r} must be harness:model, e.g. codex:gpt-5.6-luna")
+        harnesses.get(harness)
+        return cls(harness, model)
+
+    def __str__(self):
+        return self.label or f"{self.harness}:{self.model}"
+
+    @property
+    def slug(self) -> str:
+        return "".join(c if c.isalnum() or c in ".-_" else "-" for c in str(self).replace(":", "-"))
+
+
+@dataclass
+class RunResult:
+    batch: str
+    task: Task
+    agent: Agent
+    condition: str
+    repeat: int
+    run_dir: Path
+    started_at: str = ""
+    verdict: str = ""
+    correct: bool = False  # verdict in grading.CORRECT and the SQL came from submit_sql
+    lenient: bool = False  # verdict in grading.LENIENT, wherever the SQL came from
+    sql_source: str = ""  # submit | final_message | last_query | none
+    sql: str | None = None
+    rows_returned: int = 0
+    rows_expected: int = 0
+    queries_run: int = 0
+    submits: int = 0
+    wall_seconds: float = 0.0
+    exit_code: int | None = None
+    usage: harnesses.Usage = field(default_factory=harnesses.Usage)
+    detail: str = ""
+
+    def to_row(self) -> dict:
+        u = self.usage
+        return {
+            "batch": self.batch,
+            "started_at": self.started_at,
+            "task": self.task.id,
+            "level": self.task.level,
+            "rank": self.task.rank,
+            "condition": self.condition,
+            "harness": self.agent.harness,
+            "model": self.agent.model,
+            "agent": str(self.agent),
+            "repeat": self.repeat,
+            "verdict": self.verdict,
+            "correct": int(self.correct),
+            "lenient": int(self.lenient),
+            "sql_source": self.sql_source,
+            "rows_returned": self.rows_returned,
+            "rows_expected": self.rows_expected,
+            "queries_run": self.queries_run,
+            "submits": self.submits,
+            "wall_seconds": round(self.wall_seconds, 1),
+            "exit_code": "" if self.exit_code is None else self.exit_code,
+            "turns": "" if u.turns is None else u.turns,
+            "tokens_in": u.tokens_in,
+            "tokens_out": u.tokens_out,
+            "tokens_cache_read": u.tokens_cache_read,
+            "tokens_cache_write": u.tokens_cache_write,
+            "cost_usd": "" if u.cost_usd is None else f"{u.cost_usd:.4f}",
+            "error": u.error,
+            "prompt_sha": self.task.prompt_sha,
+            "run_dir": os.path.relpath(self.run_dir, HARNESS_DIR),
+        }
+
+    def line(self) -> str:
+        cost = f"${self.usage.cost_usd:.4f}" if self.usage.cost_usd is not None else "cost n/a"
+        src = "" if self.sql_source in ("submit", "none") else f" [not submitted; graded {self.sql_source}]"
+        msg = (
+            f"{self.task.name} {self.condition} {self.agent} r{self.repeat}: {self.verdict}{src} "
+            f"({self.rows_returned}/{self.rows_expected} rows, {self.queries_run} queries, "
+            f"{self.wall_seconds:.0f}s, {cost})"
+        )
+        if self.detail and not self.correct:
+            msg += f"\n    {self.detail}"
+        return msg
+
+
+def new_batch_id(name: str | None = None) -> str:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return f"{stamp}-{name}" if name else stamp
+
+
+# ---------- one run ----------
+
+
+def _log_entries(run_dir: Path) -> list[tuple[str, str]]:
+    """(kind, sql) for each tool call. Entries are "-- <timestamp> <KIND> [note]\n<sql>\n;\n\n",
+    KIND in RUN, ERROR, REFUSED, SUBMIT, SUBMIT-ERROR, REFUSED-SUBMIT."""
+    path = run_dir / "queries.log"
+    if not path.exists():
+        return []
+    entries, kind, body = [], None, []
+    for line in path.read_text().splitlines():
+        if m := _LOG_HEAD.match(line):  # agent SQL may contain "-- comments"; headers carry an ISO timestamp
+            if kind:
+                entries.append((kind, "\n".join(body).strip().removesuffix(";").strip()))
+            kind, body = m.group(1), []
+        else:
+            body.append(line)
+    if kind:
+        entries.append((kind, "\n".join(body).strip().removesuffix(";").strip()))
+    return entries
+
+
+def _launch(cmd: list[str], ctx: RunContext, env: dict, timeout_s: int) -> tuple[int | None, bool]:
+    with open(ctx.run_dir / "transcript.jsonl", "w") as out, open(ctx.run_dir / "stderr.log", "w") as err:
+        proc = subprocess.Popen(
+            cmd, cwd=ctx.work_dir, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True
+        )
+        try:
+            return proc.wait(timeout=timeout_s), False
+        except subprocess.TimeoutExpired:
+            # The CLIs spawn MCP servers and helpers; kill the whole process group.
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(proc.pid, sig)
+                except ProcessLookupError:
+                    break
+                try:
+                    proc.wait(timeout=10)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+            return proc.returncode, True
+
+
+def append_scorecard(row: dict, path: Path | None = None) -> None:
+    path = path or SCORECARD  # resolved per call so tests can redirect it
+    with _scorecard_lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        new = not path.exists() or path.stat().st_size == 0
+        if not new:
+            with open(path) as f:
+                header = f.readline().strip().split(",")
+            if header != COLS:
+                raise RuntimeError(f"{path} has columns {header}; expected {COLS}. Migrate it before appending.")
+        with open(path, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=COLS)
+            if new:
+                w.writeheader()
+            w.writerow(row)
+
+
+def run_one(
+    task: Task,
+    agent: Agent | str,
+    *,
+    condition: str = "bare",
+    repeat: int = 1,
+    batch: str | None = None,
+    db: Path | None = None,
+    timeout_s: int = 900,
+    max_turns: int = 40,
+    keep_work: bool = False,
+    record: bool = True,
+) -> RunResult:
+    """One headless agent session on one task, graded against task.target_sql.
+
+    The database is the task's own (a question file's `db`), else `db`, else tpch.duckdb.
+    """
+    agent = Agent.parse(agent)
+    db = resolve_db(task, db)
+    harness = harnesses.get(agent.harness)
+    batch = batch or new_batch_id()
+    name = f"{task.id}-{task.level}-{condition}-{agent.slug}-r{repeat}"
+    run_dir = RESULTS / batch / name
+    # CLIs include cwd in their system context. Neither the question id nor a
+    # descriptive batch name should disclose the benchmark identity there.
+    work_dir = WORK_ROOT / uuid.uuid4().hex
+    cond_dir = CONDITIONS / condition
+    if not cond_dir.is_dir():
+        raise ValueError(
+            f"no condition {condition!r}; have {sorted(p.name for p in CONDITIONS.iterdir() if p.is_dir())}"
+        )
+    run_dir.mkdir(parents=True, exist_ok=False)
+    work_dir.mkdir(parents=True, exist_ok=False)
+    # A git root stops CLIs that walk up for AGENTS.md / .agents/ from looking any further.
+    subprocess.run(["git", "init", "-q", str(work_dir)], check=True)
+    notes = None
+    if (cond_dir / "AGENTS.md").exists():
+        notes = work_dir / "AGENTS.md"
+        shutil.copy(cond_dir / "AGENTS.md", notes)
+
+    ctx = RunContext(
+        prompt=task.prompt,
+        model=agent.model,
+        work_dir=work_dir,
+        run_dir=run_dir,
+        db=db,
+        notes=notes,
+        max_turns=max_turns,
+        timeout_s=timeout_s,
+        extra_args=agent.extra_args,
+    )
+    res = RunResult(
+        batch=batch,
+        task=task,
+        agent=agent,
+        condition=condition,
+        repeat=repeat,
+        run_dir=run_dir,
+        started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+    )
+    (run_dir / "prompt.md").write_text(task.prompt + "\n")
+
+    timed_out = False
+    try:
+        harness.prepare(ctx)
+        cmd = harness.command(ctx)
+        (run_dir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "task": asdict(task) | {"prompt_sha": task.prompt_sha},
+                    "agent": asdict(agent),
+                    "condition": condition,
+                    "repeat": repeat,
+                    "batch": batch,
+                    "work_dir": str(work_dir),
+                    "argv": [a if a != task.prompt else "<prompt.md>" for a in cmd],
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        t0 = time.monotonic()
+        res.exit_code, timed_out = _launch(cmd, ctx, harness.env(ctx), timeout_s)
+        res.wall_seconds = time.monotonic() - t0
+        res.usage = harness.parse(ctx, run_dir / "transcript.jsonl")
+    except Exception as e:  # noqa: BLE001 - a broken harness is a result, not a crash of the whole grid
+        res.usage.error = f"{type(e).__name__}: {e}"[:300]
+    finally:
+        if not keep_work:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    if res.usage.final_text and not (run_dir / "final_message.txt").exists():
+        (run_dir / "final_message.txt").write_text(res.usage.final_text)
+
+    # Only submitted SQL can be correct. Without a submission, grade what the agent most plausibly meant
+    # (a ```sql block in its final message, else its last successful query) so the miss is diagnosable.
+    entries = _log_entries(run_dir)
+    last_run = next((sql for kind, sql in reversed(entries) if kind == "RUN"), None)
+    answer = run_dir / "answer.sql"
+    if answer.exists():
+        res.sql, res.sql_source = answer.read_text(), "submit"
+    elif sql := harnesses.sql_from_text(res.usage.final_text):
+        res.sql, res.sql_source = sql, "final_message"
+    elif last_run:
+        res.sql, res.sql_source = last_run, "last_query"
+    else:
+        res.sql_source = "none"
+
+    g = grading.grade_sql(res.sql, task.target_sql, ctx.db)
+    res.verdict, res.detail = g.verdict, g.detail
+    res.correct = g.correct and res.sql_source == "submit"
+    res.lenient = g.verdict in grading.LENIENT
+    res.rows_returned, res.rows_expected = g.rows_got, g.rows_expected
+    if res.sql is None:
+        if timed_out:
+            res.verdict = "timeout"
+        elif res.usage.error or res.exit_code not in (0, None):
+            res.verdict = "harness_error"
+            res.detail = res.usage.error or f"exit {res.exit_code}; see stderr.log"
+    kinds = Counter(kind for kind, _ in entries)
+    res.queries_run, res.submits = kinds["RUN"], kinds["SUBMIT"]
+
+    (run_dir / "result.json").write_text(
+        json.dumps(
+            res.to_row() | {"detail": res.detail, "column_map": g.column_map, "usage_extra": res.usage.extra}, indent=2
+        )
+    )
+    if record:
+        append_scorecard(res.to_row())
+    return res
+
+
+# ---------- grid ----------
+
+
+def resolve_db(task: Task, default: Path | None = None) -> Path:
+    return Path(task.db or default or DB).resolve()
+
+
+def preflight(
+    tasks: list[Task], agents: list[Agent], conditions: list[str], db: Path | None = None, allow_leaky: bool = False
+) -> None:
+    """Fail before spending anything: missing CLIs, databases, conditions, broken targets, leaky prompts."""
+    problems = []
+    for d in sorted({resolve_db(t, db) for t in tasks}):
+        if not d.exists():
+            problems.append(f"database missing: {d} (for tpch: uv run setup_db.py)")
+    if Path(WORK_ROOT).resolve().is_relative_to(REPO_ROOT):
+        problems.append(f"work root {WORK_ROOT} is inside the repo; agents could read the answer key")
+    for h in sorted({a.harness for a in agents}):
+        if not harnesses.get(h).available():
+            problems.append(f"{h}: {harnesses.get(h).binary} not on PATH")
+    for c in conditions:
+        if not (CONDITIONS / c).is_dir():
+            problems.append(f"no condition {c!r} in {CONDITIONS}")
+    for t in tasks:
+        if not allow_leaky:
+            try:
+                t.check_leaks()
+            except ValueError as e:
+                problems.append(str(e))
+    if not problems:
+        for target, tdb in {(t.target_sql, resolve_db(t, db)) for t in tasks}:
+            owner = next(t.name for t in tasks if t.target_sql == target and resolve_db(t, db) == tdb)
+            try:
+                if not grading.expected_result(target, tdb).rows:
+                    print(
+                        f"warning: target SQL for {owner} returns 0 rows; any empty answer will match", file=sys.stderr
+                    )
+            except grading.SQLError as e:
+                problems.append(f"target SQL for {owner} fails: {e}")
+    if problems:
+        raise SystemExit("preflight failed:\n  " + "\n  ".join(problems))
+
+
+def run_grid(
+    tasks: list[Task],
+    agents: list[Agent | str],
+    *,
+    conditions: list[str] = ("bare",),
+    repeats: int = 1,
+    jobs: int = 4,
+    harness_jobs: dict[str, int] | None = None,
+    batch: str | None = None,
+    db: Path | None = None,
+    allow_leaky: bool = False,
+    quiet: bool = False,
+    **run_kw,
+) -> list[RunResult]:
+    """Every task x agent x condition x repeat, `jobs` at a time (`harness_jobs` caps one CLI, e.g. {"agy": 2}).
+
+    Runs are ordered repeat-major with agents innermost, so concurrent slots spread across providers
+    and an interrupted grid still has complete early repeats.
+    """
+    agents = [Agent.parse(a) for a in agents]
+    conditions = list(conditions)
+    preflight(tasks, agents, conditions, db, allow_leaky)
+    batch = batch or new_batch_id()
+    plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in agents]
+    caps = {h: threading.Semaphore(n) for h, n in (harness_jobs or {}).items()}
+    if not quiet:
+        print(
+            f"batch {batch}: {len(plan)} runs ({len(tasks)} tasks x {len(agents)} agents x "
+            f"{len(conditions)} conditions x {repeats} repeats), {jobs} parallel"
+        )
+
+    def go(t, a, c, r):
+        cap = caps.get(a.harness)
+        if cap:
+            cap.acquire()
+        try:
+            return run_one(t, a, condition=c, repeat=r, batch=batch, db=db, **run_kw)
+        finally:
+            if cap:
+                cap.release()
+
+    results: list[RunResult] = []
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = {pool.submit(go, *p): p for p in plan}
+        for i, fut in enumerate(as_completed(futures), 1):
+            t, a, c, r = futures[fut]
+            try:
+                res = fut.result()
+            except Exception as e:  # noqa: BLE001
+                # A crashed attempt belongs in the denominator, even when it
+                # fails outside run_one's launch exception handler.
+                run_dir = RESULTS / batch / f"{t.id}-{t.level}-{c}-{a.slug}-r{r}"
+                run_dir.mkdir(parents=True, exist_ok=True)
+                res = RunResult(batch=batch, task=t, agent=a, condition=c, repeat=r,
+                                run_dir=run_dir, verdict="harness_error", sql_source="none",
+                                detail=f"{type(e).__name__}: {e}"[:300])
+                res.usage.error = res.detail
+                (run_dir / "prompt.md").write_text(t.prompt + "\n")
+                (run_dir / "result.json").write_text(json.dumps(res.to_row() | {"detail": res.detail}, indent=2))
+                if run_kw.get("record", True):
+                    append_scorecard(res.to_row())
+            results.append(res)
+            if not quiet:
+                print(f"[{i}/{len(plan)}] {res.line()}", flush=True)
+
+    try:
+        (WORK_ROOT / batch).rmdir()  # empty once every run has cleaned up after itself
+    except OSError:
+        pass
+    batch_dir = RESULTS / batch
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    rows = [r.to_row() for r in results]
+    with open(batch_dir / "results.jsonl", "w") as f:
+        f.writelines(json.dumps(row) + "\n" for row in rows)
+    report = summarize(rows)
+    (batch_dir / "summary.txt").write_text(report + "\n")
+    if not quiet:
+        print("\n" + report)
+    return results
+
+
+# ---------- reporting ----------
+
+
+def load_scorecard(batch: str | None = None, path: Path | None = None) -> list[dict]:
+    """Scorecard rows, optionally one batch ("latest" = most recent)."""
+    path = path or SCORECARD
+    if not path.exists():
+        return []
+    with open(path) as f:
+        rows = list(csv.DictReader(f))
+    if rows and list(rows[0]) != COLS:
+        raise RuntimeError(f"{path} has columns {list(rows[0])}; expected {COLS}")
+    if batch == "latest" and rows:
+        batch = max(r["batch"] for r in rows)
+    return [r for r in rows if batch is None or r["batch"] == batch]
+
+
+def _f(v) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def summarize(rows: list[dict]) -> str:
+    """Ladder view: one line per task x condition x agent, k/n correct at each level, then cost and effort."""
+    if not rows:
+        return "no runs"
+    # A level whose prompt was edited between batches is split by prompt hash, never pooled.
+    shas: dict[tuple, set] = defaultdict(set)
+    for r in rows:
+        shas[(r["task"], r["level"])].add(r.get("prompt_sha") or "")
+    rows = [
+        r
+        | {
+            "level": r["level"]
+            if len(shas[(r["task"], r["level"])]) == 1
+            else f"{r['level']}@{r.get('prompt_sha') or 'legacy'}"[:12]
+        }
+        for r in rows
+    ]
+    ranks: dict[str, dict[str, float]] = defaultdict(dict)
+    for r in rows:
+        rank = _f(r.get("rank"))
+        ranks[r["task"]][r["level"]] = min(ranks[r["task"]].get(r["level"], 1e9), 1e9 if rank is None else rank)
+    level_order = {t: sorted(lv, key=lambda name: (lv[name], name)) for t, lv in ranks.items()}
+    cells = defaultdict(list)
+    for r in rows:
+        cells[(r["task"], r["condition"], r["agent"])].append(r)
+
+    out = []
+    for task in sorted(level_order):
+        levels = level_order[task]
+        keys = sorted(k for k in cells if k[0] == task)
+        width = max(len(k[2]) for k in keys)
+        out.append(
+            f"{task:<{width + 9}s} " + "  ".join(f"{lv:>12s}" for lv in levels) + "   queries   wall_s   cost/run"
+        )
+        for key in keys:
+            rs = cells[key]
+            by_level = defaultdict(list)
+            for r in rs:
+                by_level[r["level"]].append(r)
+            ladder = []
+            for lv in levels:
+                lr = by_level.get(lv, [])
+                k = sum(int(r["correct"]) for r in lr)
+                near = sum(int(r["lenient"]) for r in lr) - k
+                ladder.append((f"{k}/{len(lr)}" + (f" (+{near})" if near > 0 else "")) if lr else "-")
+            q = [_f(r["queries_run"]) for r in rs if _f(r["queries_run"]) is not None]
+            w = [_f(r["wall_seconds"]) for r in rs if _f(r["wall_seconds"]) is not None]
+            c = [_f(r["cost_usd"]) for r in rs if _f(r["cost_usd"]) is not None]
+            out.append(
+                f"  {key[1]:6s} {key[2]:{width}s} "
+                + "  ".join(f"{x:>12s}" for x in ladder)
+                + f"   {statistics.mean(q) if q else 0:7.1f}   {statistics.median(w) if w else 0:6.0f}"
+                + f"   {f'${statistics.mean(c):.4f}' if c else 'n/a':>8s}"
+            )
+        out.append("")
+
+    misses = Counter(r["verdict"] for r in rows if not int(r["correct"]))
+    n_ok = sum(int(r["correct"]) for r in rows)
+    out.append(f"{n_ok}/{len(rows)} correct" + (f"; misses by verdict: {dict(misses.most_common())}" if misses else ""))
+    if any(int(r["lenient"]) > int(r["correct"]) for r in rows):
+        out.append("(+n): n more runs had the right rows but added extra columns or never called submit_sql")
+    fallback = Counter(r["sql_source"] for r in rows if r["sql_source"] in ("final_message", "last_query"))
+    if fallback:
+        out.append(f"never called submit_sql, graded anyway for diagnosis (never counted correct): {dict(fallback)}")
+    return "\n".join(out)

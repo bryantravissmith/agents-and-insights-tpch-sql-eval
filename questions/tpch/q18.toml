@@ -1,0 +1,28 @@
+id = "q18"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q18.sql"
+note = "Large volume customer. HAVING SUM(quantity) > 300 per order; LIMIT 100 by total price desc then order date."
+
+[[levels]]
+name = "terse"
+prompt = '''
+Which customers placed the really large orders?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Sales wants a list of large-volume orders: any order whose line items add up to more than 300 units. Show customer name, customer key, order key, order date, the order's total price and its total quantity. Biggest total price first, then earliest date; top 100.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the sales team:
+
+> Find orders whose total line-item quantity is greater than 300. For each, return the customer name, customer key, order key, order date, order total price, and the order's total quantity. Sort by total price descending, then order date ascending, and keep the first 100 rows.
+
+Requirements:
+
+- Return exactly six columns, in this order: customer name, customer key, order key, order date, total price, total quantity.
+'''

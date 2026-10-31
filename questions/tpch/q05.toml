@@ -1,0 +1,29 @@
+id = "q05"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q05.sql"
+note = "Local supplier volume. Customer and supplier must share a nation (easy to drop); region ASIA, orders in 1994."
+
+[[levels]]
+name = "terse"
+prompt = '''
+Revenue by Asian country for 1994, local suppliers only.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For orders placed in 1994, how much revenue did each Asian nation generate from customers buying from suppliers located in their own nation? Revenue is price after discount. One row per nation, highest revenue first.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the regional sales team:
+
+> For orders placed on or after 1994-01-01 and before 1995-01-01, consider line items where the customer and the supplier are located in the same nation, and that nation is in the ASIA region. Report revenue (the sum of extended price * (1 - discount)) per nation, sorted by revenue descending.
+
+Requirements:
+
+- Return exactly two columns: nation name and revenue.
+- Do not round revenue.
+'''

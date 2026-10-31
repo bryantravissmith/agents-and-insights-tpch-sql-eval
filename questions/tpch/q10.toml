@@ -1,0 +1,29 @@
+id = "q10"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q10.sql"
+note = "Returned item reporting. Filter return flag R before aggregating; quarter of order date; LIMIT 20."
+
+[[levels]]
+name = "terse"
+prompt = '''
+Which customers returned the most in Q4 1993?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Customer success wants the 20 customers who cost us the most in returns: orders placed October through December 1993, counting only line items that were returned (return flag R), where the lost revenue is price after discount. Show customer key, name, lost revenue, account balance, nation, address, phone and comment, biggest loss first.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the customer success team:
+
+> For orders placed on or after 1993-10-01 and before 1994-01-01, consider only line items with return flag 'R'. For each customer, sum extended price * (1 - discount) over those line items. Return the 20 customers with the largest sum, highest first.
+
+Requirements:
+
+- Return exactly eight columns, in this order: customer key, customer name, revenue, account balance, nation name, address, phone, comment.
+- Do not round revenue.
+'''

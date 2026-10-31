@@ -1,0 +1,29 @@
+id = "q06"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q06.sql"
+note = "Forecasting revenue change. Revenue is extended price * discount, not * (1 - discount). Half-open year, inclusive discount band."
+
+[[levels]]
+name = "terse"
+prompt = '''
+How much revenue did small discounts on small orders cost us in 1994?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Pricing wants to know how much revenue 1994's discounts cost us on small line items: items shipped in 1994 with a discount between 5% and 7% (inclusive) and a quantity under 24. The amount given away on each item is its list price times its discount. I just need the one total.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the pricing team:
+
+> For line items shipped on or after 1994-01-01 and before 1995-01-01, with discount between 0.05 and 0.07 inclusive and quantity strictly less than 24, compute the sum of extended price * discount.
+
+Requirements:
+
+- Return one row with one column: the total.
+- Do not round.
+'''

@@ -1,0 +1,29 @@
+id = "q20"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q20.sql"
+note = "Potential part promotion. Nested IN subqueries; 0.5 * SUM(quantity) shipped in 1994 per part AND supplier; pairs with no 1994 shipments do not qualify."
+
+[[levels]]
+name = "terse"
+prompt = '''
+Which Canadian suppliers have excess stock of forest parts we could promote?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+We're planning a promotion on parts whose names start with 'forest'. Which Canadian suppliers have excess stock of at least one of those parts? Excess means the supplier's available quantity of the part is more than half of the quantity of that part the same supplier shipped in 1994. Show supplier name and address, sorted by name.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the merchandising team:
+
+> For suppliers located in CANADA, find those that supply at least one part whose name starts with 'forest' and whose available quantity of that part is greater than 0.5 * the total quantity of that part shipped by that supplier between 1994-01-01 (inclusive) and 1995-01-01 (exclusive). Return each such supplier once, sorted by supplier name.
+
+Requirements:
+
+- A part and supplier with no shipments of that part in 1994 does not qualify.
+- Return exactly two columns: supplier name and supplier address.
+'''

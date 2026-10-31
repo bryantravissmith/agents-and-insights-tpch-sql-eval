@@ -1,0 +1,47 @@
+id = "n06"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Novel, first published 2026-10-31. Traps: 'first order' is the customer's first ever, not first in 1994 (filtering orders to 1994 before taking the minimum admits customers who ordered earlier); the 90-day window is relative to each customer's first order; same-day repeats do not count."
+target_sql = '''
+WITH firsts AS (
+  SELECT o_custkey, min(o_orderdate) AS first_date FROM orders GROUP BY o_custkey),
+cohort AS (
+  SELECT c_mktsegment, f.o_custkey, first_date
+  FROM firsts f JOIN customer ON c_custkey = f.o_custkey
+  WHERE first_date >= DATE '1994-01-01' AND first_date < DATE '1995-01-01')
+SELECT c_mktsegment AS segment,
+       count(*) AS cohort_customers,
+       count(*) FILTER (WHERE EXISTS (
+         SELECT 1 FROM orders o
+         WHERE o.o_custkey = cohort.o_custkey
+           AND o.o_orderdate > cohort.first_date
+           AND o.o_orderdate <= cohort.first_date + INTERVAL 90 DAY)) AS returned_within_90_days
+FROM cohort
+GROUP BY c_mktsegment
+ORDER BY c_mktsegment
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+Of customers who started with us in 1994, how many came back within 90 days, by segment?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I'm looking at early retention. Take the customers whose very first order with us was placed in 1994. For each market segment, how many such customers are there, and how many of them placed another order within 90 days after that first order? An order on the same day as the first doesn't count as coming back.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the customer success team:
+
+> A customer's first order date is the minimum order date across all of that customer's orders. Take the customers whose first order date is on or after 1994-01-01 and before 1995-01-01. For each market segment, return the number of these customers, and the number of them who have at least one order with an order date strictly after their first order date and no more than 90 days after it. Sort by segment.
+
+Requirements:
+
+- Count customers, not orders.
+- Return exactly three columns, in this order: segment, customers in the cohort, customers who returned within 90 days.
+'''

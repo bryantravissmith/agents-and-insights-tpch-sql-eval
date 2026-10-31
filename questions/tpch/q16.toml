@@ -1,0 +1,29 @@
+id = "q16"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q16.sql"
+note = "Parts/supplier relationship. COUNT(DISTINCT supplier); NOT IN complaint suppliers; NOT LIKE type prefix; IN size list."
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many suppliers can we get each kind of part from, leaving out suppliers with complaints?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Sourcing is checking supplier coverage. For parts that are not Brand#45, whose type does not start with MEDIUM POLISHED, and whose size is one of 49, 14, 23, 45, 19, 3, 36 or 9: how many distinct suppliers offer each brand, type and size combination? Leave out any supplier whose comment mentions customer complaints (the word Customer followed later by Complaints). Most suppliers first, then by brand, type and size.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the sourcing team:
+
+> Consider parts whose brand is not 'Brand#45', whose type does not start with 'MEDIUM POLISHED', and whose size is one of 49, 14, 23, 45, 19, 3, 36, 9. Exclude suppliers whose comment matches 'Customer' followed anywhere later by 'Complaints'. For each part brand, type and size, count the distinct suppliers that supply such parts. Sort by supplier count descending, then brand, type and size ascending.
+
+Requirements:
+
+- Count each supplier at most once per brand/type/size group.
+- Return exactly four columns, in this order: brand, type, size, supplier count.
+'''

@@ -1,0 +1,38 @@
+id = "n01"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Novel, first published 2026-10-31. Trap: joining orders to line items to filter by brand fans out and double-counts order value (naive 1993 total 656.6M vs 600.8M)."
+target_sql = '''
+SELECT year(o_orderdate) AS order_year, count(*) AS orders, sum(o_totalprice) AS order_value
+FROM orders
+WHERE o_orderdate >= DATE '1993-01-01' AND o_orderdate < DATE '1998-01-01'
+  AND EXISTS (SELECT 1 FROM lineitem JOIN part ON p_partkey = l_partkey
+              WHERE l_orderkey = o_orderkey AND p_brand = 'Brand#13')
+GROUP BY order_year
+ORDER BY order_year
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+How much order value came from orders with Brand#13 parts, by year, 1993 to 1997?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Brand#13 is up for contract renewal and I want to show how much business rides on it. For each year from 1993 through 1997 (by order date), give me the number of orders that included at least one Brand#13 part and the total value of those orders, using the order's total price. An order counts once however many Brand#13 items it has.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the category management team:
+
+> For orders placed on or after 1993-01-01 and before 1998-01-01 that contain at least one line item whose part has brand 'Brand#13', report per order year: the number of such orders and the sum of the orders' total price. Sort by year.
+
+Requirements:
+
+- Each qualifying order is counted once and its total price added once, regardless of how many of its line items are Brand#13.
+- Return exactly three columns, in this order: order year, order count, order value.
+'''

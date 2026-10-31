@@ -1,0 +1,5 @@
+tpch.duckdb
+results/*/
+results/scorecard.csv
+.pytest_cache/
+.ruff_cache/

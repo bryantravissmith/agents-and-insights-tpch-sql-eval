@@ -1,0 +1,29 @@
+id = "q07"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q07.sql"
+note = "Volume shipping. The nation pair is symmetric (both directions); year comes from the ship date; inclusive two-year window."
+
+[[levels]]
+name = "terse"
+prompt = '''
+How much did France and Germany ship to each other in 1995 and 1996?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Trade between France and Germany: for line items shipped in 1995 and 1996, the revenue (price after discount) shipped by French suppliers to German customers and by German suppliers to French customers, broken out by year of shipment. One row per supplier nation, customer nation and year, sorted in that order.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the international trade team:
+
+> Consider line items shipped between 1995-01-01 and 1996-12-31 inclusive where either the supplier is in FRANCE and the customer is in GERMANY, or the supplier is in GERMANY and the customer is in FRANCE. Group by supplier nation, customer nation, and the year of the ship date, and report revenue as the sum of extended price * (1 - discount). Sort by supplier nation, customer nation, then year.
+
+Requirements:
+
+- Return exactly four columns, in this order: supplier nation, customer nation, year, revenue.
+- Do not round revenue.
+'''

@@ -1,0 +1,29 @@
+id = "q09"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q09.sql"
+note = "Product type profit. Profit = price after discount - supply cost * quantity, supply cost matched on part AND supplier."
+
+[[levels]]
+name = "terse"
+prompt = '''
+Profit on green parts by country and year.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For every part with 'green' anywhere in its name, what was our profit by supplier nation and order year? Profit on a line item is its price after discount minus (that supplier's supply cost for the part times the quantity). Sort by nation, then most recent year first.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the product finance team:
+
+> Consider line items for parts whose name contains 'green'. The profit on a line item is extended price * (1 - discount) minus the supply cost of that part from that line item's supplier times the quantity. Group by the supplier's nation and the year of the order date, and sum the profit. Sort by nation ascending, then year descending.
+
+Requirements:
+
+- Return exactly three columns, in this order: nation, year, profit.
+- Do not round profit.
+'''

@@ -1,0 +1,29 @@
+id = "q04"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q04.sql"
+note = "Late orders by priority. Trap: JOIN lineitem fans out; needs EXISTS / COUNT(DISTINCT)."
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many late orders did we have by priority in Q3 1993?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Hey — for the ops review I need a count of late orders by order priority, for orders placed July through September 1993. An order is late if any of its items showed up after the promised date.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the operations team:
+
+> For orders placed on or after 1993-07-01 and before 1993-10-01, how many orders fall into each order priority, counting only orders where at least one line item was received after its committed delivery date? Return one row per priority with the count, sorted by priority.
+
+Requirements:
+
+- Each order must be counted at most once, regardless of how many of its line items were late.
+- Return exactly two columns: the order priority and the order count.
+'''

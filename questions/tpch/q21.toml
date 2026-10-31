@@ -1,0 +1,30 @@
+id = "q21"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q21.sql"
+note = "Saudi suppliers who alone made a multi-supplier order late. Trap: EXISTS (other supplier on order) + NOT EXISTS (other supplier late) on the same order; status 'F'; counts late line items, not orders."
+
+[[levels]]
+name = "terse"
+prompt = '''
+Which of our Saudi suppliers were the only reason orders came in late?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Procurement wants to know which suppliers based in Saudi Arabia are holding up orders that would otherwise have arrived on time. Look only at orders with status 'F' that include items from more than one supplier. A supplier gets blamed for one of its items if that item arrived after its committed delivery date while every item on the order from the other suppliers arrived on time. For each supplier, count the late items it got blamed for (items, not orders), and give me the top 100 suppliers by that count, ties broken by supplier name.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the procurement team:
+
+> For each supplier located in the nation named 'SAUDI ARABIA', count that supplier's line items that meet all four of these conditions: (1) the line item's receipt date is strictly after its commit date; (2) the line item's order has order status 'F'; (3) that same order contains at least one line item from a different supplier, whether or not that line item was late; (4) no line item on that order from any supplier other than this one has a receipt date strictly after its commit date. Return the supplier name and the count, sorted by count descending, then by supplier name ascending, keeping only the first 100 rows.
+
+Requirements:
+
+- Count line items, not orders: if one supplier has two qualifying line items on the same order, that order contributes 2 to its count. Other late line items from the same supplier on that order do not disqualify it.
+- Only suppliers with at least one qualifying line item appear in the result.
+- Return exactly two columns, in this order: supplier name, count.
+'''

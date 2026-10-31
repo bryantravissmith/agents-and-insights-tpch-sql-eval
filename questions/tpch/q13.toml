@@ -1,0 +1,29 @@
+id = "q13"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q13.sql"
+note = "Customer order-count distribution. Trap: filter in WHERE turns the LEFT JOIN into an inner join."
+
+[[levels]]
+name = "terse"
+prompt = '''
+Show me the distribution of customers by number of orders, ignoring orders with "special requests" in the comment.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Marketing wants a histogram: how many customers have 0 orders, how many have 1, how many have 2, and so on. Don't count orders whose comment mentions special requests (the comment field is free text, so match "special" then "requests" anywhere after it). Customers with zero orders need to show up. Sort by most customers first.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the marketing team:
+
+> We want a distribution of customers by how many orders they have placed. For each possible order count, how many customers have exactly that many orders? Customers with zero orders must appear as a row with count 0. When counting a customer's orders, ignore any order whose comment contains the text "special" followed later by the text "requests" (a case-sensitive substring match: anything may appear between them, and either may be part of a longer word). Sort by number of customers descending, then by order count descending.
+
+Requirements:
+
+- Customers with no qualifying orders must still appear (with an order count of 0).
+- Return exactly two columns: the order count and the number of customers with that count.
+'''

@@ -1,0 +1,28 @@
+id = "q17"
+db = "../../tpch.duckdb"                         # relative to this file
+target_sql_file = "../../tpch/queries/q17.sql"
+note = "Small-quantity-order revenue. Correlated 0.2 * AVG(quantity) per part over all its line items; divide by 7.0."
+
+[[levels]]
+name = "terse"
+prompt = '''
+How much revenue per year would we lose if we stopped taking small orders for Brand#23 parts in medium boxes?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For parts of brand Brand#23 shipped in MED BOX containers: if we stopped accepting line items whose quantity is below 20% of that part's average line-item quantity, how much revenue would we lose per year on average? Use list price (ignore discounts). The data covers seven years, so divide the total by 7.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the sales planning team:
+
+> Consider parts with brand 'Brand#23' and container 'MED BOX'. For each such part, compute the average quantity across all of its line items. Take the line items of those parts whose quantity is strictly less than 0.2 * that part's average quantity, sum their extended price, and divide by 7.0.
+
+Requirements:
+
+- Return one row with one column: the unrounded yearly average.
+'''

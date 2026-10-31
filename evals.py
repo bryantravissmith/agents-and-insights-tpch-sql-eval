@@ -1,0 +1,127 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["duckdb"]
+# ///
+"""Command line for evalkit. Every run is graded by executing the agent's SQL and the target SQL.
+
+  uv run evals.py run questions/tpch/q21.toml --agents pi:openai/gpt-5.6-luna codex:gpt-5.6-luna --repeats 3
+  uv run evals.py run questions/tpch --levels terse spec --conditions bare notes --agents agy:gemini-3.8-flash-low -j 8
+  uv run evals.py ask "Which Saudi suppliers made orders late?" --target-sql-file tpch/queries/q21.sql \
+      --agents codex:gpt-5.6-luna --repeats 5
+  uv run evals.py grade my_attempt.sql --target-sql-file tpch/queries/q21.sql    # no agent, just the grader
+  uv run evals.py summary [--batch latest | <batch id>]
+  uv run evals.py harnesses                                                           # what is installed
+
+Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from evalkit import (
+    HARNESSES,
+    Task,
+    grade_sql,
+    load_questions,
+    load_scorecard,
+    run_grid,
+    summarize,
+)
+from evalkit.runner import DB, new_batch_id
+
+
+def _grid_args(p: argparse.ArgumentParser):
+    p.add_argument("--agents", "-a", nargs="+", required=True, help="harness:model, e.g. codex:gpt-5.6-luna")
+    p.add_argument("--conditions", "-c", nargs="+", default=["bare"], help="conditions/<name> (default: bare)")
+    p.add_argument("--repeats", "-r", type=int, default=1)
+    p.add_argument("--jobs", "-j", type=int, default=4, help="parallel runs (default 4)")
+    p.add_argument("--harness-jobs", nargs="*", default=[], metavar="HARNESS=N", help="per-CLI cap, e.g. agy=2")
+    p.add_argument("--timeout", type=int, default=900, help="seconds per run (default 900)")
+    p.add_argument("--max-turns", type=int, default=40)
+    p.add_argument("--name", help="suffix for the batch id")
+    p.add_argument("--keep-work", action="store_true", help="keep the agent's scratch dir for debugging")
+    p.add_argument("--allow-leaky", action="store_true", help="skip the TPC-H / query-number prompt check")
+    _db_arg(p)
+
+
+def _db_arg(p: argparse.ArgumentParser):
+    p.add_argument("--db", type=Path, help="database for tasks that do not name one (default: tpch.duckdb)")
+
+
+def _target(args) -> str:
+    if bool(args.target_sql) == bool(args.target_sql_file):
+        raise SystemExit("give exactly one of --target-sql / --target-sql-file")
+    return args.target_sql or Path(args.target_sql_file).read_text()
+
+
+def _grid(tasks, args):
+    caps = {k: int(v) for k, v in (s.split("=", 1) for s in args.harness_jobs)}
+    results = run_grid(
+        tasks,
+        args.agents,
+        conditions=args.conditions,
+        repeats=args.repeats,
+        jobs=args.jobs,
+        harness_jobs=caps,
+        batch=new_batch_id(args.name),
+        db=args.db,
+        allow_leaky=args.allow_leaky,
+        timeout_s=args.timeout,
+        max_turns=args.max_turns,
+        keep_work=args.keep_work,
+    )
+    return 0 if results else 1
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("run", help="question files (or dirs of them) x agents x conditions x repeats")
+    p.add_argument("questions", nargs="+", help="question files or directories, e.g. questions/tpch/q21.toml")
+    p.add_argument("--levels", "-l", nargs="+", help="only these disclosure levels")
+    _grid_args(p)
+
+    p = sub.add_parser("ask", help="an arbitrary prompt graded against a target query you supply")
+    p.add_argument("prompt", help="the question exactly as the agent should see it (or @file.md)")
+    p.add_argument("--target-sql")
+    p.add_argument("--target-sql-file")
+    p.add_argument("--id", help="task id for the scorecard (default adhoc-<hash>)")
+    _grid_args(p)
+
+    p = sub.add_parser("grade", help="grade a SQL file against a target query, no agent involved")
+    p.add_argument("sql_file")
+    p.add_argument("--target-sql")
+    p.add_argument("--target-sql-file")
+    _db_arg(p)
+
+    p = sub.add_parser("summary", help="ladder table from results/scorecard.csv")
+    p.add_argument("--batch", default="latest", help="batch id, 'latest' (default) or 'all'")
+
+    sub.add_parser("harnesses", help="which agent CLIs are on PATH")
+
+    args = ap.parse_args(argv)
+    if args.cmd == "run":
+        return _grid(load_questions(*args.questions, levels=args.levels), args)
+    if args.cmd == "ask":
+        prompt = Path(args.prompt[1:]).read_text() if args.prompt.startswith("@") else args.prompt
+        return _grid([Task.adhoc(prompt, _target(args), id=args.id)], args)
+    if args.cmd == "grade":
+        g = grade_sql(Path(args.sql_file).read_text(), _target(args), args.db or DB)
+        print(f"{g.verdict} ({g.rows_got}/{g.rows_expected} rows){': ' + g.detail if g.detail else ''}")
+        return 0 if g.correct else 1
+    if args.cmd == "summary":
+        print(summarize(load_scorecard(None if args.batch == "all" else args.batch)))
+        return 0
+    if args.cmd == "harnesses":
+        for name, h in HARNESSES.items():
+            print(f"{name:7s} {'ok' if h.available() else 'missing':8s} {(h.__doc__ or '').split('. ')[0].strip()}")
+        return 0
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
