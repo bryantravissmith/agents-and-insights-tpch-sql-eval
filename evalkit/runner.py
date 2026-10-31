@@ -543,7 +543,7 @@ def _execute(plan, batch, jobs, caps, db, quiet, run_kw) -> list[RunResult]:
 # Provider-side failures: the model never answered, so the run says nothing about it. Only these are re-run.
 PROVIDER_FAILURE = re.compile(
     r"rate limit|credit balance|overloaded|temporarily unavailable|service unavailable|internal server error"
-    r"|bad gateway|gateway timeout|an error occurred while processing your request",
+    r"|bad gateway|gateway timeout|an error occurred while processing your request|usage limit|limit reached",
     re.IGNORECASE,
 )
 

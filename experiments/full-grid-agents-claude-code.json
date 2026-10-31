@@ -1,0 +1,6 @@
+[
+ {"harness": "claude", "model": "claude-haiku-5-5", "extra_args": ["--effort", "medium", "--disable-slash-commands"], "label": "claude:haiku-5.5"},
+ {"harness": "claude", "model": "claude-sonnet-5-5", "extra_args": ["--effort", "medium", "--disable-slash-commands"], "label": "claude:sonnet-5.5"},
+ {"harness": "claude", "model": "claude-opus-5-5", "extra_args": ["--effort", "medium", "--disable-slash-commands"], "label": "claude:opus-5.5"},
+ {"harness": "claude", "model": "claude-fable-5-1", "extra_args": ["--effort", "medium", "--disable-slash-commands"], "label": "claude:fable-5.1"}
+]
