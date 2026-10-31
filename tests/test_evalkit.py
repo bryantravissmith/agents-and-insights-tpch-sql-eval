@@ -306,6 +306,38 @@ def test_resume_reruns_provider_failures_and_unfinished_runs(sandbox, monkeypatc
     assert runner.resume("flaky", jobs=1, questions=[qdir], quiet=True) == []
 
 
+class CutShortHarness(FakeHarness):
+    """Runs (and maybe submits) like FakeHarness, then reports the provider error a session ends on."""
+
+    def parse(self, ctx, stdout):
+        usage = super().parse(ctx, stdout)
+        usage.error = 'OpenAI API error (429): 429 {"detail":"Rate limit exceeded"}'
+        return usage
+
+
+def test_provider_error_before_submit_is_a_harness_error(sandbox, monkeypatch, db):
+    t = Task.adhoc("How many late orders by priority?", target_sql=Q04, db=db)
+    _with_fake(monkeypatch, CutShortHarness("SELECT 1", submit=False))
+    r = runner.run_one(t, "fake:m", batch="cut", repeat=1)
+    assert (r.verdict, r.correct, r.lenient) == ("harness_error", False, False) and "Rate limit" in r.detail
+    # An answer submitted before the provider failed is still the agent's answer.
+    _with_fake(monkeypatch, CutShortHarness(Q04_BODY + "ORDER BY 1"))
+    r = runner.run_one(t, "fake:m", batch="cut", repeat=2)
+    assert (r.verdict, r.correct) == ("exact", True)
+
+
+def test_resume_reruns_runs_graded_after_a_provider_cut(sandbox, monkeypatch, db, questions_on):
+    _with_fake(monkeypatch, FakeHarness(Q04_BODY + "ORDER BY 1"))
+    qdir = questions_on(db, "q04")
+    (r,) = runner.run_grid(load_question(qdir / "q04.toml", ["spec"]), ["fake:a"], batch="old", quiet=True)
+    # As recorded before the rule existed: graded on an exploratory query although the API had failed.
+    row = json.loads((r.run_dir / "result.json").read_text())
+    row |= {"verdict": "rows_differ", "correct": False, "sql_source": "last_query", "error": "Rate limit exceeded"}
+    (r.run_dir / "result.json").write_text(json.dumps(row))
+    runner.resume("old", questions=[qdir], quiet=True)
+    assert json.loads((r.run_dir / "result.json").read_text())["verdict"] == "exact"
+
+
 def test_resume_refuses_edited_prompts(sandbox, monkeypatch, db, questions_on):
     _with_fake(monkeypatch, FakeHarness(Q04_BODY + "ORDER BY 1"))
     qdir = questions_on(db, "q04")

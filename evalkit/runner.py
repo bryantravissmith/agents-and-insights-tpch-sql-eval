@@ -360,6 +360,11 @@ def run_one(
         elif res.usage.error or res.exit_code not in (0, None):
             res.verdict = "harness_error"
             res.detail = res.usage.error or f"exit {res.exit_code}; see stderr.log"
+    elif res.sql_source != "submit" and not timed_out and PROVIDER_FAILURE.search(res.usage.error or ""):
+        # The provider cut the session short before the agent submitted: its last exploratory
+        # query is not its answer, so this is an infrastructure failure, not a model outcome.
+        res.verdict, res.correct, res.lenient = "harness_error", False, False
+        res.detail = res.usage.error
     kinds = Counter(kind for kind, _ in entries)
     res.queries_run, res.submits = kinds["RUN"], kinds["SUBMIT"]
 
@@ -589,7 +594,10 @@ def resume(
         result = run_dir / "result.json"
         if result.exists():
             row = json.loads(result.read_text())
-            if row.get("verdict") != "harness_error" or not PROVIDER_FAILURE.search(row.get("detail", "")):
+            failed = row.get("verdict") == "harness_error" and PROVIDER_FAILURE.search(row.get("detail", ""))
+            # Runs recorded before the provider-cut rule: graded on an exploratory query after the API failed.
+            cut_short = row.get("sql_source") != "submit" and PROVIDER_FAILURE.search(row.get("error") or "")
+            if not (failed or cut_short):
                 continue
             provider[p[1].label or str(p[1])] += 1
         else:
