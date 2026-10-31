@@ -5,3 +5,4 @@ results/scorecard.csv
 .ruff_cache/
 __pycache__/
 .DS_Store
+*.duckdb.tmp/
