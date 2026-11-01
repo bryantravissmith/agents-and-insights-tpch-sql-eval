@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q03.sql"
 note = "Shipping priority. Three-way join, revenue per order, LIMIT 10 ordered by revenue desc then order date."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["l_orderkey"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
 [[levels]]
 name = "terse"
 prompt = '''

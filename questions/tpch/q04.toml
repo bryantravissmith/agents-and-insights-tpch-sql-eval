@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q04.sql"
 note = "Late orders by priority. Trap: JOIN lineitem fans out; needs EXISTS / COUNT(DISTINCT)."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["order_count"]
+
 [[levels]]
 name = "terse"
 prompt = '''

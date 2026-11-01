@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q20.sql"
 note = "Potential part promotion. Nested IN subqueries; 0.5 * SUM(quantity) shipped in 1994 per part AND supplier; pairs with no 1994 shipments do not qualify."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["s_name"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
 [[levels]]
 name = "terse"
 prompt = '''

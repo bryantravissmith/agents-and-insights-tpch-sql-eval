@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q09.sql"
 note = "Product type profit. Profit = price after discount - supply cost * quantity, supply cost matched on part AND supplier."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["sum_profit"]
+
 [[levels]]
 name = "terse"
 prompt = '''

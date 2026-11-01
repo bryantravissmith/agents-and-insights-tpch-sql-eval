@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q11.sql"
 note = "Important stock identification. HAVING against a scalar subquery (0.0001 * total); the nation filter must appear in both."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["ps_partkey"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
 [[levels]]
 name = "terse"
 prompt = '''

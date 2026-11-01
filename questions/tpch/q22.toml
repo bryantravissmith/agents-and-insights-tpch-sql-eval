@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q22.sql"
 note = "Global sales opportunity. Country code = first two phone digits; average over POSITIVE balances in those codes; NOT EXISTS orders."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["numcust"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["cntrycode"]
+
 [[levels]]
 name = "terse"
 prompt = '''

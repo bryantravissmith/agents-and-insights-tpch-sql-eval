@@ -12,6 +12,9 @@ GROUP BY order_year
 ORDER BY order_year
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["orders", "order_value"]
+
 [[levels]]
 name = "terse"
 prompt = '''

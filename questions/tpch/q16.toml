@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q16.sql"
 note = "Parts/supplier relationship. COUNT(DISTINCT supplier); NOT IN complaint suppliers; NOT LIKE type prefix; IN size list."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["supplier_cnt"]
+
 [[levels]]
 name = "terse"
 prompt = '''

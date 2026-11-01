@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q12.sql"
 note = "Shipping modes and order priority. Two CASE/SUM columns; three date predicates; counts line items, not orders."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["high_line_count", "low_line_count"]
+
 [[levels]]
 name = "terse"
 prompt = '''

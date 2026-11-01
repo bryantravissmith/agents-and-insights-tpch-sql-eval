@@ -66,6 +66,11 @@ def _grid_args(p: argparse.ArgumentParser):
     p.add_argument("--keep-work", action="store_true", help="keep the agent's scratch dir for debugging")
     p.add_argument("--allow-leaky", action="store_true", help="skip the TPC-H / query-number prompt check")
     p.add_argument("--dry-run", action="store_true", help="print the plan and each prompt's hash, run nothing")
+    p.add_argument(
+        "--declare-columns",
+        action="store_true",
+        help="submit_sql also takes the answer's column names, and runs are graded by them (a different prompt)",
+    )
     _db_arg(p)
 
 
@@ -108,6 +113,7 @@ def _grid(tasks, args):
         max_turns=args.max_turns,
         keep_work=args.keep_work,
         dry_run=args.dry_run,
+        declare_columns=args.declare_columns,
     )
     return 0 if results or args.dry_run else 1
 
@@ -170,6 +176,11 @@ def main(argv=None) -> int:
     p.add_argument("batches", nargs="+", help="batch ids whose runs to re-grade")
     p.add_argument("--questions", type=Path, nargs="+", required=True, help="the new question files or folders")
     p.add_argument("--name", required=True, help="name for the re-graded batch, e.g. novel-v2-regrade")
+    p.add_argument(
+        "--declare-all",
+        action="store_true",
+        help="grade as if every run declared all its result columns (checks label pairing on old runs)",
+    )
 
     p = sub.add_parser("reparse", help="recompute turns, tokens and cost from saved transcripts (after a parser fix)")
     p.add_argument("batch", help="batch id (the folder name under results/)")
@@ -197,7 +208,7 @@ def main(argv=None) -> int:
         print(f"styled {done['runs']} runs; see {done['out_dir']}/summary.md")
         return 0
     if args.cmd == "regrade":
-        regrade.regrade(args.batches, args.questions, args.name)
+        regrade.regrade(args.batches, args.questions, args.name, declare_all=args.declare_all)
         return 0
     if args.cmd == "reparse":
         reparse(args.batch)

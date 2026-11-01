@@ -23,6 +23,9 @@ JOIN nation ON n_nationkey = f.c_nationkey
 ORDER BY nation
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["customers", "customers_for_half", "share_covered"]
+
 [[levels]]
 name = "terse"
 prompt = '''

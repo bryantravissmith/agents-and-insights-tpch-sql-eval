@@ -20,6 +20,9 @@ GROUP BY c_mktsegment
 ORDER BY segment
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["sprees", "sprees_3_plus", "avg_orders_per_spree"]
+
 [[levels]]
 name = "terse"
 prompt = '''

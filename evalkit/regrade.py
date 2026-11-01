@@ -19,10 +19,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import grading, harnesses
+from .declared import ALL, grade_task
+from .declared import read_declaration as recorded_declaration
 from .runner import COLS, RESULTS, _git_state, _log_entries, _sha256, write_manifest
 from .tasks import load_questions
 
-COPIED = ("prompt.md", "answer.sql", "queries.log", "final_message.txt", "meta.json")
+COPIED = ("prompt.md", "answer.sql", "answer_columns.json", "queries.log", "final_message.txt", "meta.json")
 
 
 def graded_sql(run_dir: Path) -> tuple[str | None, str]:
@@ -45,8 +47,14 @@ def regrade(
     results: Path | None = None,
     quiet: bool = False,
     now: datetime | None = None,
+    declare_all: bool = False,
 ) -> dict:
-    """Grade every matching run of `batches` against the question files in `questions`; write a new batch."""
+    """Grade every matching run of `batches` against the question files in `questions`; write a new batch.
+
+    A run that declared its answer columns (`answer_columns.json`) is graded by them (see `declared`).
+    `declare_all` grades every run as if it had declared all of its result columns: the check of what pairing
+    rows by label and ignoring context columns would change for runs that declared nothing.
+    """
     results = results or RESULTS
     tasks = load_questions(*questions)
     by_prompt = {(t.level, t.prompt_sha): t for t in tasks}
@@ -73,7 +81,15 @@ def regrade(
             sql, source = graded_sql(src)
             if source != row.get("sql_source"):
                 mismatched_source.append(row["run_dir"])
-            g, ref = grading.grade_any(sql, task.target_sql, task.accepted_sql, task.db)
+            declared = ALL if declare_all else recorded_declaration(src)
+            g, ref, notes = (
+                grade_task(sql, declared, task, task.db)
+                if declared is not None
+                else (
+                    *grading.grade_any(sql, task.target_sql, task.accepted_sql, task.db),
+                    {},
+                )
+            )
             dest = out / src.name.replace(f"{row['task']}-", f"{task.id}-", 1)
             dest.mkdir()
             for f in COPIED:
@@ -90,6 +106,7 @@ def regrade(
                 "detail": g.detail,
                 "column_map": g.column_map,
                 "reference": ref,
+                "declaration": notes,
                 "run_dir": str(dest.relative_to(results.parent)),
                 "regraded_from": row["run_dir"],
                 "original": {k: row.get(k) for k in ("task", "verdict", "correct", "lenient")},
@@ -100,6 +117,7 @@ def regrade(
     manifest = {
         "batch": batch,
         "kind": "regrade",
+        "declared": "every result column" if declare_all else "as recorded",
         "created_at": now.isoformat(timespec="seconds"),
         "completed_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "git": _git_state(),

@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q10.sql"
 note = "Returned item reporting. Filter return flag R before aggregating; quarter of order date; LIMIT 20."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = [["c_custkey", "c_name"]]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
 [[levels]]
 name = "terse"
 prompt = '''

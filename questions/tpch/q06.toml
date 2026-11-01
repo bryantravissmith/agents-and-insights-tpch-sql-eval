@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q06.sql"
 note = "Forecasting revenue change. Revenue is extended price * discount, not * (1 - discount). Half-open year, inclusive discount band."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["revenue"]
+
 [[levels]]
 name = "terse"
 prompt = '''

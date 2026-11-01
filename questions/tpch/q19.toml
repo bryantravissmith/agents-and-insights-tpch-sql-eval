@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q19.sql"
 note = "Discounted revenue. Three OR-ed condition blocks, each with its own container list, quantity range and size range."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["revenue"]
+
 [[levels]]
 name = "terse"
 prompt = '''

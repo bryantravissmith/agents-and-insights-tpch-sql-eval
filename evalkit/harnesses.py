@@ -36,10 +36,12 @@ class RunContext:
     max_turns: int
     timeout_s: int
     extra_args: tuple[str, ...] = ()
+    declare: bool = False  # submit_sql also takes answer_columns (see evalkit/declared.py)
 
     @property
     def tool_env(self) -> dict[str, str]:
-        return {"AUDIT_DB": str(self.db), "AUDIT_OUT": str(self.run_dir)}
+        env = {"AUDIT_DB": str(self.db), "AUDIT_OUT": str(self.run_dir)}
+        return env | ({"AUDIT_DECLARE": "1"} if self.declare else {})
 
     def mcp_server(self) -> dict:
         return {"command": "uv", "args": ["run", "--quiet", str(MCP_SERVER)], "env": self.tool_env}

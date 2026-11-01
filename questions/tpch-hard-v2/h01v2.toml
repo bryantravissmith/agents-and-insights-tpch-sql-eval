@@ -15,6 +15,9 @@ GROUP BY longest
 ORDER BY longest
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["customers"]
+
 [[levels]]
 name = "terse"
 prompt = '''

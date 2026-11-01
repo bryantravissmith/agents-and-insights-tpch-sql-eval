@@ -14,6 +14,9 @@ GROUP BY n_name
 ORDER BY n_name
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["customers_without_1997_orders"]
+
 [[levels]]
 name = "terse"
 prompt = '''

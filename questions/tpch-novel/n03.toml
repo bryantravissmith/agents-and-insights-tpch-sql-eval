@@ -18,6 +18,9 @@ QUALIFY rank() OVER (PARTITION BY r_name ORDER BY revenue DESC) = 1
 ORDER BY region
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["customer", "revenue"]
+
 [[levels]]
 name = "terse"
 prompt = '''

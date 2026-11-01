@@ -11,6 +11,7 @@
  * Configuration via environment variables (set by evalkit for each run):
  *   AUDIT_DB       path to the .duckdb file            (default <sql-evals>/tpch.duckdb)
  *   AUDIT_OUT      directory for queries.log / answer.* (default <sql-evals>/results/adhoc)
+ *   AUDIT_DECLARE  1: submit_sql also takes answer_columns, saved to answer_columns.json
  *
  * Requires the `duckdb` CLI on PATH (brew install duckdb).
  */
@@ -26,6 +27,32 @@ const MAX_ROWS = 50;
 const HARNESS = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DB = resolve(process.env.AUDIT_DB ?? resolve(HARNESS, "tpch.duckdb"));
 const OUT = resolve(process.env.AUDIT_OUT ?? resolve(HARNESS, "results", "adhoc"));
+// Batches run with declared answer columns: submit_sql also takes the names of the columns that answer.
+const DECLARE = process.env.AUDIT_DECLARE === "1";
+
+/** The column names in the header line of the duckdb CLI's CSV output (quoted names unquoted). */
+function csvHeader(out: string): string[] {
+  const header = out.split("\n")[0] ?? "";
+  const cols: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < header.length; i++) {
+    const ch = header[i];
+    if (quoted) {
+      if (ch === '"' && header[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") {
+      cols.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  cols.push(cur.replace(/\r$/, ""));
+  return cols;
+}
 
 // sqlguard:begin
 // A line-for-line copy of ../sqlguard.py (read its docstring); tests/test_sqlguard.py runs both on the same SQL.
@@ -200,10 +227,17 @@ export default function (pi: any) {
     description:
       "Submit your final answer. Saves the query and executes it to confirm it runs. " +
       "Call this exactly once, when you are confident the query is correct. After calling it, summarize your assumptions and stop.",
-    parameters: Type.Object({
-      sql: Type.String({ description: "The final SELECT statement that answers the question." }),
-    }),
-    async execute(_id: string, params: { sql: string }) {
+    parameters: DECLARE
+      ? Type.Object({
+          sql: Type.String({ description: "The final SELECT statement that answers the question." }),
+          answer_columns: Type.Array(Type.String(), {
+            description: "The names of the result columns that answer the request; other columns are context.",
+          }),
+        })
+      : Type.Object({
+          sql: Type.String({ description: "The final SELECT statement that answers the question." }),
+        }),
+    async execute(_id: string, params: { sql: string; answer_columns?: string[] }) {
       const bad = refuse(params.sql);
       if (bad) {
         log("REFUSED-SUBMIT", params.sql, bad);
@@ -219,7 +253,21 @@ export default function (pi: any) {
         throw new Error(`Submitted query failed: ${(e.stderr ?? e.message ?? "").toString().trim()}`);
       }
       const rows = Math.max(out.trimEnd().split("\n").length - 1, 0);
-      log("SUBMIT", params.sql, `rows=${rows}`);
+      if (DECLARE) {
+        const cols = csvHeader(out);
+        const names = new Set(cols.map((c) => c.toLowerCase()));
+        const declared = (params.answer_columns ?? []).map((c) => c.trim());
+        const unknown = declared.filter((c) => !names.has(c.toLowerCase()));
+        if (declared.length === 0 || unknown.length > 0) {
+          const note = `answer_columns ${JSON.stringify(unknown.length ? unknown : "empty")} not in the result columns ${JSON.stringify(cols)}`;
+          log("SUBMIT-ERROR", params.sql, note);
+          throw new Error(`Submission not recorded: ${note}. Name columns of your query's result.`);
+        }
+        writeFileSync(resolve(OUT, "answer_columns.json"), JSON.stringify(declared));
+        log("SUBMIT", params.sql, `rows=${rows} answer_columns=${JSON.stringify(declared)}`);
+      } else {
+        log("SUBMIT", params.sql, `rows=${rows}`);
+      }
       return {
         content: [{ type: "text", text: `Submitted. ${rows} rows recorded. Now state your assumptions and stop.` }],
         details: { rows },

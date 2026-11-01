@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q08.sql"
 note = "National market share. CASE inside SUM; region applies to the customer, nation to the supplier; year from order date."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["mkt_share"]
+
 [[levels]]
 name = "terse"
 prompt = '''

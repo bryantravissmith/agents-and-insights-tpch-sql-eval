@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q13.sql"
 note = "Customer order-count distribution. Trap: filter in WHERE turns the LEFT JOIN into an inner join."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["custdist"]
+
 [[levels]]
 name = "terse"
 prompt = '''

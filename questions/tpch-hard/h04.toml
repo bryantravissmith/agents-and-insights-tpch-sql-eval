@@ -24,6 +24,9 @@ JOIN x hi ON hi.r_name = h.r_name AND hi.pos = floor(h.h) + 1
 ORDER BY region
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["orders", "p90_order_revenue"]
+
 [[levels]]
 name = "terse"
 prompt = '''

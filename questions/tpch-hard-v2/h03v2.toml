@@ -20,6 +20,9 @@ GROUP BY n_name
 ORDER BY nation
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["customers_for_half"]
+
 [[levels]]
 name = "terse"
 prompt = '''

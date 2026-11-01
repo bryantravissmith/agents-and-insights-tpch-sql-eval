@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q21.sql"
 note = "Saudi suppliers who alone made a multi-supplier order late. Trap: EXISTS (other supplier on order) + NOT EXISTS (other supplier late) on the same order; status 'F'; counts late line items, not orders."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["s_name"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
 [[levels]]
 name = "terse"
 prompt = '''

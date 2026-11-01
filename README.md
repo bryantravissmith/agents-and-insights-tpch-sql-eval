@@ -36,6 +36,7 @@ uv run evals.py audit <batch> [<batch> ...] --out audit/        # cheating attem
 uv run evals.py findings <batch> [...] --out findings/ --audit audit/   # claims with intervals over questions
 uv run evals.py regrade <batch> [...] --questions questions/tpch-novel-v2 --name novel-v2   # new key, same runs
 uv run evals.py style <batch> [<batch> ...] --out style/        # SQL style and dialect stumbles by maker and set
+uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --declare-columns   # agents name their answer columns
 ```
 
 `report` reads every current run of the batches and prints accuracy (and lenient, which also counts right answers that were never submitted) by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
@@ -49,7 +50,9 @@ uv run evals.py style <batch> [<batch> ...] --out style/        # SQL style and 
 
 `style` describes how each model family writes SQL and how often DuckDB rejects it, every table sliced by question set (TPC-H, novel, hard): queries, schema lookups and failed queries per run, DuckDB's error types, calls to functions DuckDB does not have, the share of submitted queries using each construct (comma joins, CTEs, window functions, `QUALIFY`, `EXTRACT` versus `year()`, `GROUP BY 1`, `NULLIF`, `ROUND` and more) and query length. A construct common on TPC-H and absent from the other sets is the benchmark's style, not the model's. The rules are in `evalkit/style.py`.
 
-`regrade` grades saved runs against new versions of their questions, matched by level and prompt hash, without running an agent: the reference is never shown to the agent, so a version that changes only the reference leaves every run as it was. It writes `results/regrade-<name>/`; each run keeps its prompt, graded SQL, query log and final message, and records the original grade and run. See `questions/README.md` for why the novel set has a v2.
+`regrade` grades saved runs against new versions of their questions, matched by level and prompt hash, without running an agent: the reference is never shown to the agent, so a version that changes only the reference leaves every run as it was. It writes `results/regrade-<name>/`; each run keeps its prompt, graded SQL, query log and final message, and records the original grade and run. See `questions/README.md` for why the novel set has a v2. A run that declared its answer columns is re-graded by them; `--declare-all` treats every saved run as if it had declared all of its result columns.
+
+**Declared answer columns** (`run --declare-columns`): `submit_sql` also takes the names of the result columns that answer the request. The grader pairs rows by the question's label columns, normalizing their form, and scores only the declared columns against the answer columns. See `questions/README.md`, "Answer, label and context columns", and `evalkit/declared.py`.
 
 `experiments/full-grid-2026-10-31.sh` runs `reparse`, `rescore`, `report`, `audit`, `style`, the novel and hard v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
 

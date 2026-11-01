@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q01.sql"
 note = "Pricing summary. Aggregates at lineitem grain, no join; baseline sanity check. Inclusive ship-date cutoff."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["sum_qty", "sum_base_price", "sum_disc_price", "sum_charge", "avg_qty", "avg_price", "avg_disc", "count_order"]
+
 [[levels]]
 name = "terse"
 prompt = '''

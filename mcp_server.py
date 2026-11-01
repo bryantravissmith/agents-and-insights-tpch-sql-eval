@@ -7,12 +7,15 @@
 Same two tools, same blocklist (sqlguard.py), same logging as extensions/duckdb-tools.ts (which pi uses):
   run_sql(sql)     read-only, <=50 rows as CSV, every statement appended to $AUDIT_OUT/queries.log
   submit_sql(sql)  saves $AUDIT_OUT/answer.sql and runs it (evalkit re-executes answer.sql to grade)
+                   with AUDIT_DECLARE=1 it also takes answer_columns, saved to answer_columns.json
 
-Env: AUDIT_DB (path to tpch.duckdb), AUDIT_OUT (run directory).
+Env: AUDIT_DB (path to tpch.duckdb), AUDIT_OUT (run directory), AUDIT_DECLARE (1: declared answer columns).
 Run: uv run mcp_server.py        (stdio transport; the CLIs launch it themselves)
 """
+
 import csv
 import io
+import json
 import os
 from datetime import UTC, datetime
 
@@ -25,6 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.abspath(os.environ.get("AUDIT_DB", os.path.join(HERE, "tpch.duckdb")))
 OUT = os.path.abspath(os.environ.get("AUDIT_OUT", os.path.join(HERE, "results", "adhoc")))
 MAX_ROWS = 50
+# Batches run with declared answer columns: submit_sql also takes the names of the columns that answer.
+DECLARE = os.environ.get("AUDIT_DECLARE") == "1"
 
 mcp = FastMCP("audit")
 
@@ -81,10 +86,7 @@ def run_sql(sql: str) -> str:
     return shown + tail
 
 
-@mcp.tool()
-def submit_sql(sql: str) -> str:
-    """Submit your FINAL answer. Saves the query and executes it to confirm it runs.
-    Call exactly once, when you are confident the query is correct. Then state your assumptions and stop."""
+def _submit(sql: str, answer_columns: list[str] | None) -> str:
     bad = refuse(sql)
     if bad:
         _log("REFUSED-SUBMIT", sql, bad)
@@ -93,12 +95,39 @@ def submit_sql(sql: str) -> str:
     with open(os.path.join(OUT, "answer.sql"), "w") as f:
         f.write(sql.strip() + "\n")
     try:
-        _, rows = _run(sql)
+        cols, rows = _run(sql)
     except Exception as e:  # noqa: BLE001
         _log("SUBMIT-ERROR", sql, str(e)[:300])
         raise ValueError(f"Submitted query failed: {e}") from None
-    _log("SUBMIT", sql, f"rows={len(rows)}")
+    if answer_columns is not None:
+        names = {c.lower() for c in cols}
+        unknown = [c for c in answer_columns if c.strip().lower() not in names]
+        if not answer_columns or unknown:
+            note = f"answer_columns {unknown or 'empty'} not in the result columns {cols}"
+            _log("SUBMIT-ERROR", sql, note)
+            raise ValueError(f"Submission not recorded: {note}. Name columns of your query's result.")
+        with open(os.path.join(OUT, "answer_columns.json"), "w") as f:
+            json.dump([c.strip() for c in answer_columns], f)
+    _log("SUBMIT", sql, f"rows={len(rows)}" + (f" answer_columns={answer_columns}" if answer_columns else ""))
     return f"Submitted. {len(rows)} rows recorded. Now state your assumptions and stop."
+
+
+if DECLARE:
+
+    @mcp.tool()
+    def submit_sql(sql: str, answer_columns: list[str]) -> str:
+        """Submit your FINAL answer. Saves the query and executes it to confirm it runs.
+        answer_columns: the names of the result columns that answer the request; other columns are context.
+        Call exactly once, when you are confident the query is correct. Then state your assumptions and stop."""
+        return _submit(sql, answer_columns)
+
+else:
+
+    @mcp.tool()
+    def submit_sql(sql: str) -> str:
+        """Submit your FINAL answer. Saves the query and executes it to confirm it runs.
+        Call exactly once, when you are confident the query is correct. Then state your assumptions and stop."""
+        return _submit(sql, None)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q15.sql"
 note = "Top supplier. Supplier(s) at MAX revenue; the per-supplier revenue must be reused for both the max and the final select."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = [["s_suppkey", "s_name"]]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
 [[levels]]
 name = "terse"
 prompt = '''

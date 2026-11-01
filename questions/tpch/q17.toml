@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q17.sql"
 note = "Small-quantity-order revenue. Correlated 0.2 * AVG(quantity) per part over all its line items; divide by 7.0."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["avg_yearly"]
+
 [[levels]]
 name = "terse"
 prompt = '''

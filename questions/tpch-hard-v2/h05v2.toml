@@ -16,6 +16,9 @@ QUALIFY yr >= 1993
 ORDER BY region, year
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["active", "change"]
+
 [[levels]]
 name = "terse"
 prompt = '''

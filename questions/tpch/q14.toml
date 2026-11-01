@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q14.sql"
 note = "Promotion effect. CASE in the numerator only; ship-date month; result is a percentage 0-100."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["promo_revenue"]
+
 [[levels]]
 name = "terse"
 prompt = '''

@@ -59,6 +59,9 @@ accepted_sql = [
   ''',
 ]
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["orders", "change"]
+
 [[levels]]
 name = "terse"
 prompt = '''

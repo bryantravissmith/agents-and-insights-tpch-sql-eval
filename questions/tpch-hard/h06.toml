@@ -20,6 +20,9 @@ ORDER BY improvement DESC, s_suppkey
 LIMIT 5
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["supplier", "nation", "rank_1995", "rank_1996", "improvement"]
+
 [[levels]]
 name = "terse"
 prompt = '''

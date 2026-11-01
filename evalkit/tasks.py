@@ -40,7 +40,13 @@ class Task:
     target_sql: str
     rank: int = 0  # position in the ladder: 0 = least specified
     db: Path | None = None  # database for the agent and the grader; None = the caller's default
-    accepted_sql: tuple[str, ...] = ()  # other readings that also count as correct (see grading.grade_any)
+    accepted_sql: tuple[str, ...] = ()  # other forms of the same answer (see grading.grade_any)
+    # The target's columns that answer the question, one tuple per answer (interchangeable columns, such as a
+    # key and a name, share one); the target's other columns are labels. Empty: every column is an answer.
+    answer_columns: tuple[tuple[str, ...], ...] = ()
+    # The target's columns that say which row is which (a month, a segment). None: every non-answer column.
+    # Columns in neither list are context: not graded and not used to pair rows.
+    label_columns: tuple[str, ...] | None = None
 
     @property
     def references(self) -> tuple[str, ...]:
@@ -126,6 +132,16 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
         accepted = lv.get("accepted_sql", [] if lv_target is not target else spec.get("accepted_sql", []))
         if not isinstance(accepted, list) or not all(isinstance(a, str) and a.strip() for a in accepted):
             raise ValueError(f"{path}:{lv['name']}: accepted_sql must be a list of SQL strings")
+        # Each entry is one answer: a column name, or a list of interchangeable names (a key or a name).
+        answers = lv.get("answer_columns", [] if lv_target is not target else spec.get("answer_columns", []))
+        slots = [[a] if isinstance(a, str) else a for a in answers] if isinstance(answers, list) else None
+        if slots is None or not all(
+            isinstance(s, list) and s and all(isinstance(c, str) and c.strip() for c in s) for s in slots
+        ):
+            raise ValueError(f"{path}:{lv['name']}: answer_columns must list column names or lists of names")
+        labels = lv.get("label_columns", None if lv_target is not target else spec.get("label_columns"))
+        if labels is not None and not (isinstance(labels, list) and all(isinstance(c, str) for c in labels)):
+            raise ValueError(f"{path}:{lv['name']}: label_columns must be a list of column names")
         brief = lv["prompt"].strip()
         prompt = brief if lv.get("raw") or not preamble else f"{preamble}\n\n{brief}"
         tasks.append(
@@ -137,6 +153,8 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
                 rank=rank,
                 db=db,
                 accepted_sql=tuple(a.strip() for a in accepted),
+                answer_columns=tuple(tuple(c.strip() for c in s) for s in slots),
+                label_columns=None if labels is None else tuple(c.strip() for c in labels),
             )
         )
     if not tasks:

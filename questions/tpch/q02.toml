@@ -3,6 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q02.sql"
 note = "Minimum cost supplier. Correlated MIN(supply cost) subquery must keep the same region filter as the outer query."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["p_partkey", "s_name"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
 [[levels]]
 name = "terse"
 prompt = '''

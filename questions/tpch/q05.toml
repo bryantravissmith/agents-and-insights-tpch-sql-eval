@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q05.sql"
 note = "Local supplier volume. Customer and supplier must share a nation (easy to drop); region ASIA, orders in 1994."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["revenue"]
+
 [[levels]]
 name = "terse"
 prompt = '''

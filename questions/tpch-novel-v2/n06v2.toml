@@ -20,6 +20,9 @@ GROUP BY c_mktsegment
 ORDER BY c_mktsegment
 '''
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["returned_within_90_days"]
+
 [[levels]]
 name = "terse"
 prompt = '''

@@ -3,6 +3,9 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q07.sql"
 note = "Volume shipping. The nation pair is symmetric (both directions); year comes from the ship date; inclusive two-year window."
 
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["revenue"]
+
 [[levels]]
 name = "terse"
 prompt = '''

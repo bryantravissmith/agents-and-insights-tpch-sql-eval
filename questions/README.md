@@ -69,6 +69,27 @@ Re-graded, the 810 saved hard terse runs score 288 correct. The column fix alone
 
 A cross-family review argued for accepting those other readings instead. Accepted alternatives were briefly used that way and were removed, because an alternative definition makes the rung stop testing ambiguity. Choosing them from what most agents did would also grade toward the agents.
 
+## Answer, label and context columns
+
+Each file marks what its target's columns are for, used when a run declares its answer columns (`--declare-columns`, below):
+- `answer_columns`: the columns that answer the question. An entry is a name, or a list of names that each answer it alone, such as `["c_custkey", "c_name"]`: a customer's key or name.
+- `label_columns`: the columns that say which row is which (a month, a segment). When the key is left out, every non-answer column is a label.
+- **Context:** a column in neither list (a supplier's address beside "which suppliers") is not graded and not used to pair rows.
+
+"Which ..." questions set `label_columns = []`: their answer is an identity, and the rest is context. The markings are judgment calls, drafted for all 46 files on 2026-11-01 and awaiting review.
+
+With `uv run evals.py run ... --declare-columns`:
+- **The tool:** `submit_sql` also takes `answer_columns`, the names of the agent's result columns that answer the request, and each prompt asks for them. That makes it a different prompt, so a different batch.
+- **Pairing rows:** labels pair the agent's rows with the reference's, in any order, after normalizing their form. Text ignores case and spaces; a year can be a number or text; a day can be a date, a midnight timestamp or `'YYYY-MM-DD'`; a column of first-of-month days reads as months. Pairing by label stops the right values under the wrong labels from passing.
+- **Scoring:** the declared columns are compared with the answer columns on the paired rows, with the grader's rounding rule. Undeclared columns are not graded.
+- **Fallback:** when the labels can't pair (other rows, or a label form not normalized, such as a month number or name), the run is graded by its whole result, as without a declaration, with `accepted_sql` still applying.
+- **Record:** `result.json`'s `declaration` says which way the run was graded and how the columns lined up.
+
+`uv run evals.py regrade <batches> --questions questions/tpch questions/tpch-novel questions/tpch-hard --name declared-all --declare-all` checks this on saved runs, which declared nothing, by treating every result column as declared. On the 2026-10-31 grid:
+- 13,487 of 13,864 runs paired by label;
+- no run that is correct today became wrong;
+- 220 became right: n04's month written as a date (95), "which" answers without the reference's context columns (q15 46, q21 36, q10 32, q02 9), and two more.
+
 ## Accepted alternatives
 
 A question file, or a level, may list `accepted_sql = ['''...''', ...]`: other queries whose results are **the same answer in another form**. The grader tries the target first, then each alternative, and takes the first correct match, preferring one with exactly the reference's columns. `result.json` records which in `reference` (0 is the target).
