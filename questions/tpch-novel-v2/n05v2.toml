@@ -1,0 +1,19 @@
+id = "n05v2"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Version 2 of n05's terse rung, 2026-11-01: unchanged from v1 (its reference returns only what the terse brief asks), kept so the v2 set has all six questions. Trap: the average must include customers with zero 1995 orders (a third of customers never order). Averaging over customers who ordered gives about 2.64 instead of about 1.50."
+target_sql = '''
+SELECT c_mktsegment AS segment,
+       count(o_orderkey) / count(DISTINCT c_custkey) AS avg_orders_per_customer
+FROM customer
+LEFT JOIN orders ON o_custkey = c_custkey
+  AND o_orderdate >= DATE '1995-01-01' AND o_orderdate < DATE '1996-01-01'
+GROUP BY c_mktsegment
+ORDER BY c_mktsegment
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+What's the average number of orders per customer in 1995, by market segment?
+'''

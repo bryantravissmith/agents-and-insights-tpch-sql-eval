@@ -27,6 +27,18 @@ Six questions written for this eval on 2026-10-31, on the same database with the
 
 Run them alongside the TPC-H ladder (`uv run evals.py run questions/tpch questions/tpch-novel ...`). The gap between memorized and novel questions is itself a result.
 
+**Who wrote these, and what that did.** The novel and hard questions and their reference SQL were drafted by Claude Opus 5.5 in Claude Code and checked by hand. On the terse rung, four references carried that model's habits: a count or a denominator the brief never asks for (n01, n06), a month as a `'YYYY-MM'` string (n04), and a revenue column where the brief asks only who (n03). The grader compares columns, so the agents that share those habits, the Claude models, scored higher on the terse rung. Graded against the v2 references below, the same saved answers flip: on n01 and n06, Claude models go from 59 of 80 runs correct to 3, and the other agents from 5 of 192 to 186. With extra columns allowed, both groups are near 100%. Read v1 terse novel results as agreement with one author's conventions, not as skill.
+
+## Novel questions, version 2 (`tpch-novel-v2/`)
+
+The terse rung of the six novel questions, with references that return only what each terse brief asks and `accepted_sql` alternatives where a correct answer has more than one form (a month as a date, a timestamp, `'YYYY-MM'`, a number or a name; a year as a number or text; day 90 included or not). The prompts are identical to v1's, so every saved v1 terse run is also a valid v2 run: `uv run evals.py regrade <batches> --questions questions/tpch-novel-v2 --name novel-v2` grades them again without running an agent. n02 and n05 are unchanged; their re-grade reproduces v1's grades exactly. The v2 references were drafted by the same model and reviewed by GPT-6.1 Sol (a different model family). The review's data-dependent points were checked against the database; a human review is still owed.
+
+Two readings are still decided by the author, not the brief: "biggest customer" (n03v2) is ranked by money spent, not by number of orders, and the n05 average counts customers with no 1995 orders as zero.
+
+## Accepted alternatives
+
+A question file, or a level, may list `accepted_sql = ['''...''', ...]`: other queries whose results also count as correct. The grader tries the target first, then each alternative, and takes the first correct match (then the first lenient one); `result.json` records which in `reference` (0 is the target). Use it for representations of the same answer, not for different questions. An alternative belongs to the target it sits beside: a level with its own target does not inherit the file's alternatives.
+
 ## Hard novel questions (`tpch-hard/`)
 
 Six questions written on 2026-10-31 to separate the strongest models from strong ones. The difficulty is in exact multi-step reasoning, not in vagueness: the `spec` level defines everything, and the agent still has to get islands, sessions, running thresholds, an unusual percentile, a comparable partial-year window or tied ranks exactly right. Each target agrees with an independently written second query (`tests/test_second_derivations.py`), and `tests/test_evalkit.py` checks that the tempting shortcut grades wrong.

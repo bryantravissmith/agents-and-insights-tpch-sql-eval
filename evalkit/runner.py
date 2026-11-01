@@ -123,6 +123,7 @@ class RunResult:
     sql: str | None = None
     rows_returned: int = 0
     rows_expected: int = 0
+    reference: int = 0  # which reference the grade used: 0 = the target, n = the nth accepted alternative
     queries_run: int = 0
     submits: int = 0
     wall_seconds: float = 0.0
@@ -396,7 +397,7 @@ def run_one(
     else:
         res.sql_source = "none"
 
-    g = grading.grade_sql(res.sql, task.target_sql, ctx.db)
+    g, res.reference = grading.grade_any(res.sql, task.target_sql, task.accepted_sql, ctx.db)
     res.verdict, res.detail = g.verdict, g.detail
     res.correct = g.correct and res.sql_source == "submit"
     res.lenient = g.verdict in grading.LENIENT
@@ -417,7 +418,14 @@ def run_one(
 
     (run_dir / "result.json").write_text(
         json.dumps(
-            res.to_row() | {"detail": res.detail, "column_map": g.column_map, "usage_extra": res.usage.extra}, indent=2
+            res.to_row()
+            | {
+                "detail": res.detail,
+                "column_map": g.column_map,
+                "reference": res.reference,  # 0 = the target; n = the nth accepted alternative
+                "usage_extra": res.usage.extra,
+            },
+            indent=2,
         )
     )
     if record:
@@ -455,8 +463,8 @@ def preflight(
             except ValueError as e:
                 problems.append(str(e))
     if not problems:
-        for target, tdb in {(t.target_sql, resolve_db(t, db)) for t in tasks}:
-            owner = next(t.name for t in tasks if t.target_sql == target and resolve_db(t, db) == tdb)
+        for target, tdb in {(ref, resolve_db(t, db)) for t in tasks for ref in t.references}:
+            owner = next(t.name for t in tasks if target in t.references and resolve_db(t, db) == tdb)
             try:
                 if not grading.expected_result(target, tdb).rows:
                     print(
@@ -526,6 +534,7 @@ def batch_manifest(batch, tasks, agents, conditions, repeats, jobs, harness_jobs
                 "level": t.level,
                 "prompt_sha": t.prompt_sha,
                 "target_sha256": _sha256(t.target_sql.encode()),
+                **({"accepted_sha256": [_sha256(a.encode()) for a in t.accepted_sql]} if t.accepted_sql else {}),
                 "db": resolve_db(t, db or DB).name,
             }
             for t in tasks

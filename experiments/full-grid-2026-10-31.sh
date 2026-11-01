@@ -26,8 +26,13 @@ uv run evals.py report "${BATCHES[@]}" --csv "$OUT/report.csv" > "$OUT/report.md
 # Cheating attempts and signs of prior exposure, with the evidence for every flagged run.
 uv run evals.py audit "${BATCHES[@]}" --out "$OUT/audit"
 
+# The same novel terse answers graded by references that return only what each brief asks (questions/
+# tpch-novel-v2, identical prompts). No agent runs; rebuilt from the saved runs every time.
+uv run evals.py regrade "${BATCHES[@]}" --questions questions/tpch-novel-v2 --name novel-v2
+
 # The claims, with intervals over questions; reads the audit's runs.jsonl, so it runs after the audit.
-uv run evals.py findings "${BATCHES[@]}" --out "$OUT/findings" --audit "$OUT/audit"
+# The re-grade is a second grade of runs already counted, so it is left out of report and audit.
+uv run evals.py findings "${BATCHES[@]}" regrade-novel-v2 --out "$OUT/findings" --audit "$OUT/audit"
 
 echo "wrote $OUT/report.md, $OUT/report.csv, $OUT/audit/{summary.md,flagged.md,runs.jsonl,markers.json}"
 echo "  and $OUT/findings/{findings.md,findings.json,terse-misses.md}"

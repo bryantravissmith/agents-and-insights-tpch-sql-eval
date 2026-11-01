@@ -266,3 +266,22 @@ def grade_sql(candidate_sql: str | None, target_sql: str, db: Path) -> Grade:
     except SQLError as e:
         return Grade("sql_error", rows_expected=len(exp.rows), detail=str(e))
     return compare(got, exp)
+
+
+def grade_any(candidate_sql: str | None, target_sql: str, accepted: tuple[str, ...], db: Path) -> tuple[Grade, int]:
+    """Grade against the target and any accepted alternatives; returns the grade and which reference it used.
+
+    An alternative is another reading the question's author accepts as right, such as a month given as a date or
+    as 'YYYY-MM'. One reference written by one author encodes that author's conventions; alternatives keep the
+    grader from scoring agreement with them. Reference 0 is the target. The first correct match wins, then the
+    first lenient one; with neither, the grade is against the target, so the miss is diagnosed against it.
+    """
+    primary = grade_sql(candidate_sql, target_sql, db)
+    if primary.correct or not accepted or primary.verdict in ("no_sql", "sql_error"):
+        return primary, 0
+    grades = [primary] + [grade_sql(candidate_sql, alt, db) for alt in accepted]
+    for ok in (lambda g: g.correct, lambda g: g.verdict in LENIENT):
+        for i, g in enumerate(grades):
+            if ok(g):
+                return g, i
+    return primary, 0

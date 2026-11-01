@@ -1,0 +1,38 @@
+id = "n01v2"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Version 2 of n01's terse rung, 2026-11-01. The terse brief asks how much order value, so the reference returns only year and order value; v1's reference also returned an order count the brief never asks for, which only agents that add a count matched. accepted_sql takes the year as text or as a year-start timestamp. Same trap: adding an order's total price once per matching line item, through a join that is not deduplicated to orders, double-counts order value (naive 1993 total 656.6M vs 600.8M)."
+target_sql = '''
+SELECT year(o_orderdate) AS order_year, sum(o_totalprice) AS order_value
+FROM orders
+WHERE o_orderdate >= DATE '1993-01-01' AND o_orderdate < DATE '1998-01-01'
+  AND EXISTS (SELECT 1 FROM lineitem JOIN part ON p_partkey = l_partkey
+              WHERE l_orderkey = o_orderkey AND p_brand = 'Brand#13')
+GROUP BY order_year
+ORDER BY order_year
+'''
+# The same with the year in another form.
+accepted_sql = [
+  '''
+  SELECT CAST(year(o_orderdate) AS VARCHAR) AS order_year, sum(o_totalprice) AS order_value
+  FROM orders
+  WHERE o_orderdate >= DATE '1993-01-01' AND o_orderdate < DATE '1998-01-01'
+    AND EXISTS (SELECT 1 FROM lineitem JOIN part ON p_partkey = l_partkey
+                WHERE l_orderkey = o_orderkey AND p_brand = 'Brand#13')
+  GROUP BY 1 ORDER BY 1
+  ''',
+  '''
+  SELECT date_trunc('year', o_orderdate) AS order_year, sum(o_totalprice) AS order_value
+  FROM orders
+  WHERE o_orderdate >= DATE '1993-01-01' AND o_orderdate < DATE '1998-01-01'
+    AND EXISTS (SELECT 1 FROM lineitem JOIN part ON p_partkey = l_partkey
+                WHERE l_orderkey = o_orderkey AND p_brand = 'Brand#13')
+  GROUP BY 1 ORDER BY 1
+  ''',
+]
+
+[[levels]]
+name = "terse"
+prompt = '''
+How much order value came from orders with Brand#13 parts, by year, 1993 to 1997?
+'''

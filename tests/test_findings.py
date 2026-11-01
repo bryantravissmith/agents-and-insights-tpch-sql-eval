@@ -106,7 +106,7 @@ def test_run_findings_writes_deterministic_files(tmp_path):
     out = tmp_path / "out"
     f = findings.run_findings(["b"], out, audit_runs=audit, results=results, questions=qdir, root=tmp_path)
     assert f["partial"] == {}
-    strict, asked = (f["terse_rules"][r]["gaps"]["pi:a"] for r in ("strict", "as-asked"))
+    strict, asked = (f["terse_rules"]["tpch-novel"][r]["gaps"]["pi:a"] for r in ("strict", "as-asked"))
     assert strict["gap"] == 1.0 and asked["gap"] == 0.0  # the whole gap is left-out columns
     md = (out / "findings.md").read_text()
     assert "## 2. TPC-H minus novel" in md and "### tpch-novel, as-asked" in md

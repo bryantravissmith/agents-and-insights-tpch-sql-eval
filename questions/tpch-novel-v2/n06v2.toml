@@ -1,0 +1,47 @@
+id = "n06v2"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Version 2 of n06's terse rung, 2026-11-01. The terse brief asks how many came back, so the reference returns segment and that count only; v1 also returned the cohort size, which only agents that add a denominator matched. 'Within 90 days' accepts both an inclusive and an exclusive 90th day (they differ by one customer in HOUSEHOLD). Same traps: 'started with us in 1994' means the first ever order is in 1994, not the first order in 1994; the window is per customer and starts after the first order date."
+target_sql = '''
+WITH firsts AS (
+  SELECT o_custkey, min(o_orderdate) AS first_date FROM orders GROUP BY o_custkey),
+cohort AS (
+  SELECT c_mktsegment, f.o_custkey, first_date
+  FROM firsts f JOIN customer ON c_custkey = f.o_custkey
+  WHERE first_date >= DATE '1994-01-01' AND first_date < DATE '1995-01-01')
+SELECT c_mktsegment AS segment,
+       count(*) FILTER (WHERE EXISTS (
+         SELECT 1 FROM orders o
+         WHERE o.o_custkey = cohort.o_custkey
+           AND o.o_orderdate > cohort.first_date
+           AND o.o_orderdate <= cohort.first_date + INTERVAL 90 DAY)) AS returned_within_90_days
+FROM cohort
+GROUP BY c_mktsegment
+ORDER BY c_mktsegment
+'''
+# The same with the 90th day excluded.
+accepted_sql = [
+  '''
+  WITH firsts AS (
+    SELECT o_custkey, min(o_orderdate) AS first_date FROM orders GROUP BY o_custkey),
+  cohort AS (
+    SELECT c_mktsegment, f.o_custkey, first_date
+    FROM firsts f JOIN customer ON c_custkey = f.o_custkey
+    WHERE first_date >= DATE '1994-01-01' AND first_date < DATE '1995-01-01')
+  SELECT c_mktsegment AS segment,
+         count(*) FILTER (WHERE EXISTS (
+           SELECT 1 FROM orders o
+           WHERE o.o_custkey = cohort.o_custkey
+             AND o.o_orderdate > cohort.first_date
+             AND o.o_orderdate < cohort.first_date + INTERVAL 90 DAY)) AS returned_within_90_days
+  FROM cohort
+  GROUP BY c_mktsegment
+  ORDER BY c_mktsegment
+  ''',
+]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Of customers who started with us in 1994, how many came back within 90 days, by segment?
+'''

@@ -40,6 +40,12 @@ class Task:
     target_sql: str
     rank: int = 0  # position in the ladder: 0 = least specified
     db: Path | None = None  # database for the agent and the grader; None = the caller's default
+    accepted_sql: tuple[str, ...] = ()  # other readings that also count as correct (see grading.grade_any)
+
+    @property
+    def references(self) -> tuple[str, ...]:
+        """The target, then the accepted alternatives: everything that defines a correct answer."""
+        return (self.target_sql, *self.accepted_sql)
 
     def __post_init__(self):
         if not self.prompt.strip():
@@ -116,9 +122,23 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
             if ("target_sql" in lv or "target_sql_file" in lv)
             else target
         )
+        # Accepted alternatives follow the target they belong to: a level with its own target brings its own.
+        accepted = lv.get("accepted_sql", [] if lv_target is not target else spec.get("accepted_sql", []))
+        if not isinstance(accepted, list) or not all(isinstance(a, str) and a.strip() for a in accepted):
+            raise ValueError(f"{path}:{lv['name']}: accepted_sql must be a list of SQL strings")
         brief = lv["prompt"].strip()
         prompt = brief if lv.get("raw") or not preamble else f"{preamble}\n\n{brief}"
-        tasks.append(Task(id=qid, level=lv["name"], prompt=prompt, target_sql=lv_target, rank=rank, db=db))
+        tasks.append(
+            Task(
+                id=qid,
+                level=lv["name"],
+                prompt=prompt,
+                target_sql=lv_target,
+                rank=rank,
+                db=db,
+                accepted_sql=tuple(a.strip() for a in accepted),
+            )
+        )
     if not tasks:
         raise ValueError(f"{path}: no [[levels]]")
     if levels:

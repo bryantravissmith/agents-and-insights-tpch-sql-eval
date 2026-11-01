@@ -16,6 +16,7 @@
   uv run evals.py report <batch id> [<batch id> ...] --csv report.csv                   # accuracy + efficiency
   uv run evals.py audit <batch id> [<batch id> ...] --out audit/                        # cheating + prior exposure
   uv run evals.py findings <batch id> [<batch id> ...] --out findings/ --audit audit/   # claims, with intervals
+  uv run evals.py regrade <batch id> [...] --questions questions/tpch-novel-v2 --name X  # new reference, same runs
   uv run evals.py harnesses                                                           # what is installed
 
 Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
@@ -38,6 +39,7 @@ from evalkit import (
     load_questions,
     load_scorecard,
     progress,
+    regrade,
     report,
     run_grid,
     summarize,
@@ -158,6 +160,11 @@ def main(argv=None) -> int:
     p.add_argument("--out", type=Path, required=True, help="folder for findings.md, findings.json, terse-misses.md")
     p.add_argument("--audit", type=Path, required=True, help="the audit folder (its runs.jsonl) for these batches")
 
+    p = sub.add_parser("regrade", help="grade saved runs against new question versions with the same prompts")
+    p.add_argument("batches", nargs="+", help="batch ids whose runs to re-grade")
+    p.add_argument("--questions", type=Path, nargs="+", required=True, help="the new question files or folders")
+    p.add_argument("--name", required=True, help="name for the re-graded batch, e.g. novel-v2-regrade")
+
     p = sub.add_parser("reparse", help="recompute turns, tokens and cost from saved transcripts (after a parser fix)")
     p.add_argument("batch", help="batch id (the folder name under results/)")
 
@@ -175,6 +182,9 @@ def main(argv=None) -> int:
     if args.cmd == "findings":
         findings.run_findings(args.batches, args.out, audit_runs=args.audit / "runs.jsonl")
         print(f"wrote {args.out}/findings.md, findings.json and terse-misses.md")
+        return 0
+    if args.cmd == "regrade":
+        regrade.regrade(args.batches, args.questions, args.name)
         return 0
     if args.cmd == "reparse":
         reparse(args.batch)

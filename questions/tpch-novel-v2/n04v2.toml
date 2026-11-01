@@ -1,0 +1,66 @@
+id = "n04v2"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Version 2 of n04's terse rung, 2026-11-01. v1's reference gave the month as a 'YYYY-MM' string, so agents that returned the month as a date or timestamp failed with every count and change right. The target gives the month as a date; accepted_sql takes the other common forms (timestamp, 'YYYY-MM', month number, full or short month name, 'MM'). No month from December 1996 to December 1997 is empty, so grouping observed months is safe here. Same trap: January's change must compare with December 1996 (-20), not be NULL; filtering to 1997 before the LAG loses it."
+target_sql = '''
+WITH m AS (
+  SELECT CAST(date_trunc('month', o_orderdate) AS DATE) AS month, count(*) AS orders
+  FROM orders
+  WHERE o_orderdate >= DATE '1996-12-01' AND o_orderdate < DATE '1998-01-01'
+  GROUP BY 1)
+SELECT month, orders, orders - lag(orders) OVER (ORDER BY month) AS change
+FROM m
+QUALIFY month >= DATE '1997-01-01'
+ORDER BY month
+'''
+# Every alternative is the target with the month in another form.
+accepted_sql = [
+  '''
+  WITH m AS (
+    SELECT date_trunc('month', o_orderdate) AS month, count(*) AS orders
+    FROM orders WHERE o_orderdate >= DATE '1996-12-01' AND o_orderdate < DATE '1998-01-01' GROUP BY 1)
+  SELECT month, orders, orders - lag(orders) OVER (ORDER BY month) AS change
+  FROM m QUALIFY month >= TIMESTAMP '1997-01-01' ORDER BY month
+  ''',
+  '''
+  WITH m AS (
+    SELECT date_trunc('month', o_orderdate) AS m, count(*) AS orders
+    FROM orders WHERE o_orderdate >= DATE '1996-12-01' AND o_orderdate < DATE '1998-01-01' GROUP BY 1)
+  SELECT strftime(m, '%Y-%m') AS month, orders, orders - lag(orders) OVER (ORDER BY m) AS change
+  FROM m QUALIFY m >= TIMESTAMP '1997-01-01' ORDER BY m
+  ''',
+  '''
+  WITH m AS (
+    SELECT date_trunc('month', o_orderdate) AS m, count(*) AS orders
+    FROM orders WHERE o_orderdate >= DATE '1996-12-01' AND o_orderdate < DATE '1998-01-01' GROUP BY 1)
+  SELECT month(m) AS month, orders, orders - lag(orders) OVER (ORDER BY m) AS change
+  FROM m QUALIFY m >= TIMESTAMP '1997-01-01' ORDER BY m
+  ''',
+  '''
+  WITH m AS (
+    SELECT date_trunc('month', o_orderdate) AS m, count(*) AS orders
+    FROM orders WHERE o_orderdate >= DATE '1996-12-01' AND o_orderdate < DATE '1998-01-01' GROUP BY 1)
+  SELECT strftime(m, '%B') AS month, orders, orders - lag(orders) OVER (ORDER BY m) AS change
+  FROM m QUALIFY m >= TIMESTAMP '1997-01-01' ORDER BY m
+  ''',
+  '''
+  WITH m AS (
+    SELECT date_trunc('month', o_orderdate) AS m, count(*) AS orders
+    FROM orders WHERE o_orderdate >= DATE '1996-12-01' AND o_orderdate < DATE '1998-01-01' GROUP BY 1)
+  SELECT strftime(m, '%b') AS month, orders, orders - lag(orders) OVER (ORDER BY m) AS change
+  FROM m QUALIFY m >= TIMESTAMP '1997-01-01' ORDER BY m
+  ''',
+  '''
+  WITH m AS (
+    SELECT date_trunc('month', o_orderdate) AS m, count(*) AS orders
+    FROM orders WHERE o_orderdate >= DATE '1996-12-01' AND o_orderdate < DATE '1998-01-01' GROUP BY 1)
+  SELECT strftime(m, '%m') AS month, orders, orders - lag(orders) OVER (ORDER BY m) AS change
+  FROM m QUALIFY m >= TIMESTAMP '1997-01-01' ORDER BY m
+  ''',
+]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Monthly order counts for 1997 with the change from the month before?
+'''

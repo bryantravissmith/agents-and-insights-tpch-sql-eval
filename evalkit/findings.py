@@ -20,7 +20,7 @@ from pathlib import Path
 from .report import LEVELS, cell, load_rows, question_sets
 
 SEED, DRAWS = 20261031, 2000
-SET_ORDER = ["tpch", "tpch-novel", "tpch-hard"]
+SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard"]
 
 # Three grading rules, from the grader's verdicts (see evalkit/grading.py):
 #   strict    the grader's `correct`: the reference's columns and rows
@@ -205,6 +205,31 @@ def failure_modes(rows: list[dict], sets: dict[str, str]) -> dict:
     return out
 
 
+MAKERS = (("claude:", "Anthropic"), ("pi:gpt", "OpenAI"), ("pi:grok", "xAI"), ("agy:", "Google"))
+
+
+def maker(agent: str) -> str:
+    return next((m for prefix, m in MAKERS if agent.startswith(prefix)), agent)
+
+
+def version_shift(rows: list[dict]) -> dict[tuple, dict]:
+    """For re-graded runs (see `regrade`): the same answers graded by the old and the new reference, per maker.
+
+    (new task, maker) -> counts of runs passing each rule under the original grade and under the new one.
+    """
+    out: dict[tuple, dict] = defaultdict(lambda: {"runs": 0, "old": Counter(), "new": Counter()})
+    for r in rows:
+        if "regraded_from" not in r:
+            continue
+        cell = out[(r["task"], maker(r["agent"]))]
+        cell["runs"] += 1
+        old = r | {"verdict": r["original"]["verdict"], "correct": r["original"]["correct"]}
+        for rule in RULES:
+            cell["old"][rule] += passes(old, rule)
+            cell["new"][rule] += passes(r, rule)
+    return dict(out)
+
+
 def _pick(rows: list[dict], per_agent: int) -> list[dict]:
     """A fixed sample: the first runs per agent ordered by a hash of the run directory."""
     by_agent = defaultdict(list)
@@ -297,14 +322,19 @@ def build(batches: list[str], audit_runs: Path, *, results: Path | None = None, 
     complete = [a for a in agents if not left_out[a]]
     t = tally(rows)
     by_rule = {rule: tally(rows, rule) for rule in RULES}
+    novel = [s for s in by_set if s.startswith("tpch-novel") and "tpch" in by_set]
     return {
         "terse_rules": {
-            rule: {
-                "gaps": gaps(tr, agents, by_set, "terse"),
-                "ranks": rank_agreement(tr, complete, by_set, "terse"),
+            s: {
+                rule: {
+                    "gaps": gaps(tr, agents, by_set, "terse", b_set=s),
+                    "ranks": rank_agreement(tr, complete, by_set, "terse", b_set=s),
+                }
+                for rule, tr in by_rule.items()
             }
-            for rule, tr in by_rule.items()
+            for s in novel
         },
+        "versions": version_shift(rows),
         "tally_as_asked": by_rule["as-asked"],
         "rows": rows,
         "sets": sets,
@@ -318,7 +348,8 @@ def build(batches: list[str], audit_runs: Path, *, results: Path | None = None, 
         "recall": recall_vs_correct(rows, audit),
         "repeats": repeat_agreement(t, sets),
         "failures": failure_modes(rows, sets),
-        "cost": {a: cell([r for r in rows if r["agent"] == a]) for a in agents},
+        # A re-graded run is a second grade of a run already counted, not a second run to pay for.
+        "cost": {a: cell([r for r in rows if r["agent"] == a and "regraded_from" not in r]) for a in agents},
         "tally": t,
     }
 
@@ -373,31 +404,61 @@ def markdown(f: dict) -> str:
         (
             "strict is the grader's correct; lenient also accepts extra columns; as-asked also accepts answers that"
             " left out reference columns but got every column they returned right (an upper bound; see `RULES`)."
+            " `tpch-novel-v2` re-grades the same novel terse runs against references that return only what the"
+            " brief asks (see section 2c)."
         ),
         "",
-        "| agent | " + " | ".join(f"{rule}: TPC-H / novel / gap" for rule in RULES) + " |",
-        "|---" * (len(RULES) + 1) + "|",
     ]
-    for a in agents:
-        cells = []
+    for s, by in f["terse_rules"].items():
+        out += [
+            f"TPC-H vs {s}:",
+            "",
+            "| agent | " + " | ".join(f"{rule}: TPC-H / novel / gap" for rule in RULES) + " |",
+            "|---" * (len(RULES) + 1) + "|",
+        ]
+        for a in agents:
+            cells = []
+            for rule in RULES:
+                g = by[rule]["gaps"].get(a)
+                cells.append(
+                    "-" if g is None else f"{_pct(g['a'])} / {_pct(g['b'])} / {_pp(g['gap'])} ({_iv(g['ci'], _pp)})"
+                )
+            out.append(f"| {name(a)} | " + " | ".join(cells) + " |")
+        out += ["", f"Spearman correlation of the complete agents' terse rates, TPC-H vs {s}:", ""]
+        out += ["| rule | rho | interval |", "|---|---|---|"]
         for rule in RULES:
-            g = f["terse_rules"][rule]["gaps"].get(a)
-            cells.append(
-                "-" if g is None else f"{_pct(g['a'])} / {_pct(g['b'])} / {_pp(g['gap'])} ({_iv(g['ci'], _pp)})"
+            r = by[rule]["ranks"]
+            rho = "-" if r["rho"] is None else f"{r['rho']:+.2f}"
+            ci = "-" if r["ci"] is None else f"{r['ci'][0]:+.2f} to {r['ci'][1]:+.2f}"
+            out.append(f"| {rule} | {rho} | {ci} |")
+        out.append("")
+    if f["versions"]:
+        out += [
+            "### 2c. The same answers, two answer keys",
+            "",
+            (
+                "Every row is the same saved terse runs graded twice: by the original reference (v1) and by a"
+                " version that returns only what the brief asks (v2), with accepted alternatives where a correct"
+                " answer has more than one form. Passing runs out of runs, by the maker of the agent's model."
+                " The v1 references were drafted by an Anthropic model."
+            ),
+            "",
+            "| question | maker | runs | "
+            + " | ".join(f"v1 {rule}" for rule in RULES)
+            + " | "
+            + " | ".join(f"v2 {rule}" for rule in RULES)
+            + " |",
+            "|---" * (3 + 2 * len(RULES)) + "|",
+        ]
+        for (q, m), c in sorted(f["versions"].items()):
+            out.append(
+                f"| {q} | {m} | {c['runs']} | "
+                + " | ".join(str(c["old"][rule]) for rule in RULES)
+                + " | "
+                + " | ".join(str(c["new"][rule]) for rule in RULES)
+                + " |"
             )
-        out.append(f"| {name(a)} | " + " | ".join(cells) + " |")
-    out += [
-        "",
-        "Spearman correlation of the complete agents' terse rates on the two sets, by rule:",
-        "",
-        "| rule | rho | interval |",
-        "|---|---|---|",
-    ]
-    for rule in RULES:
-        r = f["terse_rules"][rule]["ranks"]
-        rho = "-" if r["rho"] is None else f"{r['rho']:+.2f}"
-        ci = "-" if r["ci"] is None else f"{r['ci'][0]:+.2f} to {r['ci'][1]:+.2f}"
-        out.append(f"| {rule} | {rho} | {ci} |")
+        out.append("")
     out += [
         "",
         "### 2b. Every level, strict",
@@ -537,6 +598,10 @@ def _jsonable(f: dict) -> dict:
         "gaps": f["gaps"],
         "ranks": f["ranks"],
         "terse_rules": f["terse_rules"],
+        "versions": {
+            "|".join(k): {"runs": v["runs"], "old": dict(v["old"]), "new": dict(v["new"])}
+            for k, v in f["versions"].items()
+        },
         "recall": f["recall"],
         "repeats": keys(f["repeats"]),
         "failures": keys(f["failures"]),

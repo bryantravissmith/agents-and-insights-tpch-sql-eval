@@ -32,6 +32,9 @@ uv run evals.py progress                    # running batches: runs done, correc
 uv run evals.py resume <batch> -j 6         # finish a stopped batch; re-run rate-limit and other provider failures
 uv run evals.py resume <batch> -a agy:gemini-3.8-flash   # only one agent, e.g. after its quota resets
 uv run evals.py report <batch> [<batch> ...] --csv report.csv   # accuracy + efficiency across batches
+uv run evals.py audit <batch> [<batch> ...] --out audit/        # cheating attempts and prior exposure
+uv run evals.py findings <batch> [...] --out findings/ --audit audit/   # claims with intervals over questions
+uv run evals.py regrade <batch> [...] --questions questions/tpch-novel-v2 --name novel-v2   # new key, same runs
 ```
 
 `report` reads every current run of the batches and prints strict (and lenient) accuracy by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
@@ -41,7 +44,11 @@ uv run evals.py report <batch> [<batch> ...] --csv report.csv   # accuracy + eff
 - **Cheating attempts**, from every `run_sql` call in `queries.log`, refused ones included: reaching for the answer key (DuckDB's `tpch_queries()`, `tpch_answers()`, `PRAGMA tpch`, `dbgen`), reading files or attaching databases, probing the engine (`duckdb_extensions()`, `SET`, `INSTALL`), and tool calls the CLI denied. A `got through` column counts attempts that ran.
 - **Prior exposure**: naming TPC-H or the specific query in the final message (or asking the engine for it by number), and reproducing details of the reference query that the brief at that level leaves out and the data does not reveal (TPC-H's output names such as `numwait` and `custdist`, constants such as q22's country codes or q21's `LIMIT 100`). The novel questions, written after the models were trained, run through the same detector as the control.
 
-`experiments/full-grid-2026-10-31.sh` runs `reparse`, `report` and `audit` over the 2026-10-31 batches in one go.
+`findings` turns the batches into claims, each with a 95% interval from resampling questions (ten repeats of one question are not independent, and a set of six questions is a small sample): the spec-brief ceiling, the TPC-H minus novel gap at each level under three grading rules (strict; lenient, which also accepts extra columns; as-asked, which also accepts answers that left out reference columns), whether runs that reproduce the reference score more often within a question, per-question terse tables, how misses fail, how often repeats disagree, and cost per correct answer. It also writes `terse-misses.md`, a fixed sample of terse misses to read by hand. The rules are in `evalkit/findings.py`.
+
+`regrade` grades saved runs against new versions of their questions, matched by level and prompt hash, without running an agent: the reference is never shown to the agent, so a version that changes only the reference leaves every run as it was. It writes `results/regrade-<name>/`; each run keeps its prompt, graded SQL, query log and final message, and records the original grade and run. See `questions/README.md` for why the novel set has a v2.
+
+`experiments/full-grid-2026-10-31.sh` runs `reparse`, `report`, `audit`, the novel v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
 
 From Python (a notebook, a script):
 
@@ -102,6 +109,8 @@ Add levels freely (`misleading`, `with-schema-hint`). A level may carry its own 
 ## Grading
 
 The grader executes the target SQL and the agent's SQL read-only on the same database (candidate SQL also passes the tool blocklist) and compares by column position, never by name. Integers and DECIMAL values retain their exact values; floating-point comparisons use 1e-12 relative tolerance for aggregation noise. A candidate with lower decimal precision can match a rounded target: `ROUND(x, 2)` gets at most +-0.005. Rounding allowances do not apply when both exact values have the same precision. This rejects incorrect large totals that the former 1e-6 relative tolerance accepted.
+
+A question may list `accepted_sql` alternatives, other representations of the same answer; the grader takes the first reference it matches and records which one (see `questions/README.md`). **A strict grade is agreement with the reference's author.** On a terse brief that does not say which columns to return or in what form, the strict verdict mostly measures whether the agent shares the author's conventions; compare the lenient rate, and read a few misses, before ranking agents on it.
 
 These verdicts measure result equivalence, not every instruction in a prompt. A prompt that forbids rounding or requires a particular row/column order needs a separate strict audit; `exact_unordered` and `columns_reordered` still count as equivalent results.
 
