@@ -1,0 +1,101 @@
+id = "g05"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Grain, first published 2026-11-01; drafted by Claude Opus 5.5, reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7 (questions/README.md). Trap: dividing each weekday's 1997 total by 52; 1997 has 53 Wednesdays, so Wednesday comes out at 61.67 instead of 60.51 (a weekday total, not an average, is further off). The average is over the calendar days of that weekday; the reference builds the calendar, so a day without orders would count as zero (every day of 1997 has orders). accepted_sql takes the weekday as an ISO number (Monday 1), a Sunday-first number from 0 or from 1, or an abbreviated name."
+target_sql = '''
+WITH days AS (
+  SELECT CAST(d AS DATE) AS day
+  FROM generate_series(DATE '1997-01-01', DATE '1997-12-31', INTERVAL 1 DAY) AS t(d)),
+daily AS (
+  SELECT day, count(o_orderkey) AS orders
+  FROM days LEFT JOIN orders ON o_orderdate = day
+  GROUP BY day)
+SELECT dayname(day) AS weekday, avg(orders) AS avg_orders_per_day
+FROM daily
+GROUP BY dayname(day), isodow(day)
+ORDER BY isodow(day)
+'''
+# The same answer in another form (see the note).
+accepted_sql = [
+  '''
+WITH days AS (
+  SELECT CAST(d AS DATE) AS day
+  FROM generate_series(DATE '1997-01-01', DATE '1997-12-31', INTERVAL 1 DAY) AS t(d)),
+daily AS (
+  SELECT day, count(o_orderkey) AS orders
+  FROM days LEFT JOIN orders ON o_orderdate = day
+  GROUP BY day)
+SELECT isodow(day) AS weekday, avg(orders) AS avg_orders_per_day
+FROM daily
+GROUP BY isodow(day)
+ORDER BY isodow(day)
+  ''',
+  '''
+WITH days AS (
+  SELECT CAST(d AS DATE) AS day
+  FROM generate_series(DATE '1997-01-01', DATE '1997-12-31', INTERVAL 1 DAY) AS t(d)),
+daily AS (
+  SELECT day, count(o_orderkey) AS orders
+  FROM days LEFT JOIN orders ON o_orderdate = day
+  GROUP BY day)
+SELECT dayofweek(day) AS weekday, avg(orders) AS avg_orders_per_day
+FROM daily
+GROUP BY dayofweek(day), isodow(day)
+ORDER BY isodow(day)
+  ''',
+  '''
+WITH days AS (
+  SELECT CAST(d AS DATE) AS day
+  FROM generate_series(DATE '1997-01-01', DATE '1997-12-31', INTERVAL 1 DAY) AS t(d)),
+daily AS (
+  SELECT day, count(o_orderkey) AS orders
+  FROM days LEFT JOIN orders ON o_orderdate = day
+  GROUP BY day)
+SELECT dayofweek(day) + 1 AS weekday, avg(orders) AS avg_orders_per_day
+FROM daily
+GROUP BY dayofweek(day) + 1, isodow(day)
+ORDER BY isodow(day)
+  ''',
+  '''
+WITH days AS (
+  SELECT CAST(d AS DATE) AS day
+  FROM generate_series(DATE '1997-01-01', DATE '1997-12-31', INTERVAL 1 DAY) AS t(d)),
+daily AS (
+  SELECT day, count(o_orderkey) AS orders
+  FROM days LEFT JOIN orders ON o_orderdate = day
+  GROUP BY day)
+SELECT strftime(day, '%a') AS weekday, avg(orders) AS avg_orders_per_day
+FROM daily
+GROUP BY strftime(day, '%a'), isodow(day)
+ORDER BY isodow(day)
+  ''',
+]
+
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["avg_orders_per_day"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+On average, how many orders were placed per day on each day of the week in 1997?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For staffing, I need the average number of orders placed per day, for each day of the week, in 1997: for each weekday, the average over the days of 1997 that fell on that weekday.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from operations:
+
+> For each day from 1997-01-01 through 1997-12-31, count the orders with that order date. Report, per day of the week, the average of these daily counts over the days of 1997 that fall on that weekday.
+
+Requirements:
+
+- Average over days, not orders.
+- Do not round.
+- Return exactly two columns, in this order: day of week, average orders per day.
+'''

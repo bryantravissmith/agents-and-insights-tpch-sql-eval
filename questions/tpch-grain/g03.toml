@@ -1,0 +1,43 @@
+id = "g03"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Grain, first published 2026-11-01; drafted by Claude Opus 5.5, reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7 (questions/README.md). Trap: counting rows after joining orders to line items counts line items (ALGERIA 128 instead of 102 customers); counting distinct orders is also wrong in every nation. Bought means on an order placed in 1996; nation is the customer's. Every nation has qualifying customers, so no zero rows are needed."
+target_sql = '''
+SELECT n_name AS nation, count(DISTINCT o_custkey) AS customers
+FROM orders
+JOIN lineitem ON l_orderkey = o_orderkey
+JOIN part ON p_partkey = l_partkey
+JOIN customer ON c_custkey = o_custkey
+JOIN nation ON n_nationkey = c_nationkey
+WHERE p_brand = 'Brand#45' AND o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1997-01-01'
+GROUP BY n_name
+ORDER BY nation
+'''
+
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["customers"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many customers ordered Brand#45 parts in 1996, by customer nation?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For each customer nation, how many customers bought at least one Brand#45 part in an order placed in 1996? Count each customer once.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the brand team:
+
+> Per nation of the customer, count the distinct customers with at least one order dated on or after 1996-01-01 and before 1997-01-01 that contains a line item whose part has brand 'Brand#45'.
+
+Requirements:
+
+- Each customer counts once.
+- Return exactly two columns, in this order: nation, customer count. Sort by nation.
+'''

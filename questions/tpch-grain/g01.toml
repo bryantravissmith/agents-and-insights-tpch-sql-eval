@@ -1,0 +1,41 @@
+id = "g01"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Grain, first published 2026-11-01; drafted by Claude Opus 5.5, reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7 (questions/README.md). Trap: joining orders to line items to find Brand#21 orders, then averaging, averages over matching lines, so an order with several Brand#21 items counts several times (1-URGENT 175,712 instead of 173,911, about 1%, far above the rounding allowance). Order total means o_totalprice; 1996 is the order date."
+target_sql = '''
+SELECT o_orderpriority AS priority, avg(o_totalprice) AS avg_order_value
+FROM orders
+WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1997-01-01'
+  AND EXISTS (SELECT 1 FROM lineitem JOIN part ON p_partkey = l_partkey
+              WHERE l_orderkey = o_orderkey AND p_brand = 'Brand#21')
+GROUP BY o_orderpriority
+ORDER BY priority
+'''
+
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["avg_order_value"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+What was the average order total in 1996 for orders that included a Brand#21 part, by order priority?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For a pricing review: take the orders placed in 1996 that contained at least one Brand#21 part, and give me the average order total by order priority. Use each order's total price, and count each order once however many Brand#21 items it has.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the pricing team:
+
+> For orders with order date on or after 1996-01-01 and before 1997-01-01 that contain at least one line item whose part has brand 'Brand#21', report per order priority the average of the orders' total price. Each qualifying order counts exactly once.
+
+Requirements:
+
+- Do not round the average.
+- Return exactly two columns, in this order: order priority, average order total. Sort by order priority.
+'''

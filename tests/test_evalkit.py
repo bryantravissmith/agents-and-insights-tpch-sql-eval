@@ -609,6 +609,50 @@ def test_hard_questions_reject_their_shortcuts(db):
         assert not grade_sql(sql, tasks[qid].target_sql, db).correct, qid
 
 
+def test_grain_questions_reject_their_grain_mistakes(db):
+    if db.resolve() != runner.DB.resolve():
+        pytest.skip("grain questions point at the real tpch.duckdb")
+    tasks = {t.id: t for t in load_questions(HERE / "questions" / "tpch-grain", levels=["spec"])}
+    assert sorted(tasks) == [f"g0{i}" for i in range(1, 7)]
+    for t in tasks.values():
+        t.check_leaks()
+        assert grade_sql(t.target_sql, t.target_sql, db).verdict == "exact"
+    # Each question's tempting answer at the wrong grain: averaging over lines, over orders instead of customers,
+    # counting line items, averaging shares, dividing by 52 weeks, multiplying stock through a join.
+    mistakes = {
+        "g01": """
+SELECT o_orderpriority, avg(o_totalprice) FROM orders JOIN lineitem ON l_orderkey = o_orderkey
+JOIN part ON p_partkey = l_partkey WHERE p_brand = 'Brand#21' AND year(o_orderdate) = 1996 GROUP BY 1 ORDER BY 1
+""",
+        "g02": """
+SELECT r_name, avg(o_totalprice) FROM orders JOIN customer ON c_custkey = o_custkey
+JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey
+WHERE year(o_orderdate) = 1997 GROUP BY 1 ORDER BY 1
+""",
+        "g03": """
+SELECT n_name, count(*) FROM orders JOIN lineitem ON l_orderkey = o_orderkey JOIN part ON p_partkey = l_partkey
+JOIN customer ON c_custkey = o_custkey JOIN nation ON n_nationkey = c_nationkey
+WHERE p_brand = 'Brand#45' AND year(o_orderdate) = 1996 GROUP BY 1 ORDER BY 1
+""",
+        "g04": """
+SELECT r_name, count(*) FILTER (WHERE l_returnflag = 'R') / count(*) FROM lineitem JOIN orders ON o_orderkey = l_orderkey
+JOIN customer ON c_custkey = o_custkey JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey
+WHERE year(o_orderdate) = 1994 GROUP BY 1 ORDER BY 1
+""",
+        "g05": """
+SELECT dayname(o_orderdate), count(*) / 52.0 FROM orders WHERE year(o_orderdate) = 1997
+GROUP BY 1, isodow(o_orderdate) ORDER BY isodow(o_orderdate)
+""",
+        "g06": """
+SELECT sum(ps_availqty) FROM partsupp JOIN supplier ON s_suppkey = ps_suppkey JOIN nation ON n_nationkey = s_nationkey
+JOIN lineitem ON l_partkey = ps_partkey JOIN orders ON o_orderkey = l_orderkey
+WHERE n_name = 'GERMANY' AND year(o_orderdate) = 1995
+""",
+    }
+    for qid, sql in mistakes.items():
+        assert not grade_sql(sql, tasks[qid].target_sql, db).correct, qid
+
+
 def test_preamble_prefixes_each_level_unless_raw(tmp_path, tiny_db):
     qdir = tmp_path / "questions" / "pets"
     qdir.mkdir(parents=True)

@@ -1,4 +1,4 @@
-"""Each novel and hard question's target agrees with an independently written second query.
+"""Each novel, hard and grain question's target agrees with an independently written second query.
 
 The second queries take a different route on purpose (other join shapes, correlated subqueries, list
 functions, calendar arithmetic), so a shared mistake is less likely. They run on the real tpch.duckdb.
@@ -136,13 +136,47 @@ SELECT cu.c_mktsegment, count(*), count(back.o_custkey)
 FROM c JOIN customer cu ON cu.c_custkey = c.o_custkey LEFT JOIN back ON back.o_custkey = c.o_custkey
 GROUP BY 1 ORDER BY 1
 """,
+    "g01": """
+WITH q AS (SELECT DISTINCT l_orderkey FROM lineitem, part WHERE p_partkey = l_partkey AND p_brand = 'Brand#21')
+SELECT o_orderpriority, sum(o_totalprice) / count(*) FROM orders JOIN q ON q.l_orderkey = o_orderkey
+WHERE year(o_orderdate) = 1996 GROUP BY 1 ORDER BY 1
+""",
+    "g02": """
+SELECT r.r_name, sum(o.o_totalprice) / count(DISTINCT o.o_custkey)
+FROM orders o, customer c, nation n, region r
+WHERE c.c_custkey = o.o_custkey AND n.n_nationkey = c.c_nationkey AND r.r_regionkey = n.n_regionkey
+  AND year(o.o_orderdate) = 1997
+GROUP BY 1 ORDER BY 1
+""",
+    "g03": """
+SELECT n.n_name, count(*) FROM customer c JOIN nation n ON n.n_nationkey = c.c_nationkey
+WHERE EXISTS (SELECT 1 FROM orders o JOIN lineitem l ON l.l_orderkey = o.o_orderkey JOIN part p ON p.p_partkey = l.l_partkey
+              WHERE o.o_custkey = c.c_custkey AND p.p_brand = 'Brand#45' AND year(o.o_orderdate) = 1996)
+GROUP BY 1 ORDER BY 1
+""",
+    "g04": """
+WITH o AS (SELECT o_orderkey k, o_custkey c, max(CASE WHEN l_returnflag = 'R' THEN 1 ELSE 0 END) ret
+  FROM orders JOIN lineitem ON l_orderkey = o_orderkey WHERE year(o_orderdate) = 1994 GROUP BY 1, 2)
+SELECT r_name, avg(ret) FROM o JOIN customer ON c_custkey = o.c JOIN nation ON n_nationkey = c_nationkey
+JOIN region ON r_regionkey = n_regionkey GROUP BY 1 ORDER BY 1
+""",
+    "g05": """
+SELECT dayname(d), count(o_orderkey) / count(DISTINCT d)
+FROM (SELECT o_orderdate d, o_orderkey FROM orders WHERE year(o_orderdate) = 1997) GROUP BY 1, isodow(d) ORDER BY isodow(d)
+""",
+    "g06": """
+WITH sold AS (SELECT DISTINCT l_partkey FROM lineitem, orders WHERE o_orderkey = l_orderkey AND year(o_orderdate) = 1995)
+SELECT sum(ps.ps_availqty) FROM partsupp ps
+WHERE ps.ps_suppkey IN (SELECT s_suppkey FROM supplier, nation WHERE n_nationkey = s_nationkey AND n_name = 'GERMANY')
+  AND ps.ps_partkey IN (SELECT l_partkey FROM sold)
+""",
 }
 
 
 @pytest.mark.skipif(not DB.exists(), reason="needs tpch.duckdb (uv run setup_db.py)")
 @pytest.mark.parametrize("qid", sorted(SECOND))
 def test_target_matches_second_derivation(qid):
-    folder = "tpch-novel" if qid.startswith("n") else "tpch-hard"
+    folder = {"n": "tpch-novel", "h": "tpch-hard", "g": "tpch-grain"}[qid[0]]
     (task,) = load_questions(HERE / "questions" / folder / f"{qid}.toml", levels=["spec"])
     g = grade_sql(SECOND[qid], task.target_sql, DB)
     assert g.correct, f"{qid}: {g.verdict} {g.detail}"

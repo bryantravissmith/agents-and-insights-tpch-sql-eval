@@ -69,6 +69,31 @@ Re-graded, the 810 saved hard terse runs score 288 correct. The column fix alone
 
 A cross-family review argued for accepting those other readings instead. Accepted alternatives were briefly used that way and were removed, because an alternative definition makes the rung stop testing ambiguity. Choosing them from what most agents did would also grade toward the agents.
 
+## Grain questions (`tpch-grain/`)
+
+Six questions first published 2026-11-01, each built so that the tempting first query has the wrong grain: the level one row stands for (an order, a line item, a customer, a day). Grain mistakes are among the most common analysis bugs, and none of the other sets is built to provoke them.
+
+| Id | Business question | The grain mistake it tempts | How far off it lands |
+| --- | --- | --- | --- |
+| g01 | Average order total of 1996 orders with a Brand#21 part, by priority | Joining to line items averages over lines, so orders with several matching items count several times | about 1% |
+| g02 | The average customer's total 1997 spend, by customer region | Averaging order totals: the average order, not the average customer | about 2.6 times too low |
+| g03 | Customers who ordered Brand#45 parts in 1996, by customer nation | Counting line items (or orders) instead of distinct customers | about 25% too high |
+| g04 | Share of 1994 orders with at least one returned item, by customer region | Taking the share over line items instead of orders | 0.50 instead of 0.85 |
+| g05 | Average orders per day for each weekday in 1997 | Dividing weekday totals by 52 (1997 has 53 Wednesdays), or reporting totals | Wednesday 61.67 instead of 60.51 |
+| g06 | Units of stock German suppliers hold of parts sold in 1995 | Joining stock to the line items multiplies each stock record by its sales | 4.7 times too high |
+
+**How this set differs from the novel and hard sets:**
+- **Terse briefs pin the non-grain definitions.** In the novel and hard sets, a terse brief leaves definitions open on purpose, and the intended one is graded (above). Here, the terse briefs pin every definition that is not about grain in a word or two: order total, an order placed in the year, the customer's nation or region, any supplier's orders, units of stock. A terse miss is meant to be a grain mistake, not a definition guess.
+- **Every trap is checked.** Each target agrees with an independently written second query (`tests/test_second_derivations.py`). Each question's tempting wrong query must grade wrong (`tests/test_evalkit.py`), and every trap lands well outside the grader's rounding allowance.
+- **Reviewed across model families.** The questions were drafted by Claude Opus 5.5 and reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7 with the same prompt. All three found the first g04 (an average of nation shares against a ratio of sums) differed only in the 4th decimal, under the rounding allowance, so it was replaced. Revisions after review:
+  - g05's reference builds the calendar, so a day without orders would count as zero;
+  - weekday forms include Sunday = 1;
+  - g04 accepts a percent;
+  - the terse briefs pin the definitions the reviewers found open.
+
+  The reviews and the queries that checked their claims are archived with the project notes.
+- **Run them with `--declare-grain`,** so a grain mistake is reported as `grain_not_unique`, `grain_differs` or the same grain with other rows, rather than a bare wrong value.
+
 ## Answer, label and context columns
 
 Each file marks what its target's columns are for, used when a run declares its answer columns (`--declare-columns`, below):

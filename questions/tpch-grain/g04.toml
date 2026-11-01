@@ -1,0 +1,60 @@
+id = "g04"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Grain, first published 2026-11-01; drafted by Claude Opus 5.5, reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7 (questions/README.md). Trap: computing the share over line items instead of orders: about 0.50 of 1994 line items were returned, but about 0.85 of 1994 orders had at least one returned item (AFRICA 0.4975 instead of 0.8523), and the gap survives any rounding. Replaced after review: the first g04 (ratio of sums vs average of nation shares) moved only the 4th decimal. accepted_sql takes the share as a percent."
+target_sql = '''
+SELECT r_name AS region,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey = o_orderkey AND l_returnflag = 'R'))
+         / count(*) AS returned_order_share
+FROM orders
+JOIN customer ON c_custkey = o_custkey
+JOIN nation ON n_nationkey = c_nationkey
+JOIN region ON r_regionkey = n_regionkey
+WHERE o_orderdate >= DATE '1994-01-01' AND o_orderdate < DATE '1995-01-01'
+GROUP BY r_name
+ORDER BY region
+'''
+# The same answer in another form (see the note).
+accepted_sql = [
+  '''
+SELECT r_name AS region,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey = o_orderkey AND l_returnflag = 'R'))
+         * 100.0 / count(*) AS returned_order_share
+FROM orders
+JOIN customer ON c_custkey = o_custkey
+JOIN nation ON n_nationkey = c_nationkey
+JOIN region ON r_regionkey = n_regionkey
+WHERE o_orderdate >= DATE '1994-01-01' AND o_orderdate < DATE '1995-01-01'
+GROUP BY r_name
+ORDER BY region
+  ''',
+]
+
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["returned_order_share"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+What share of orders placed in 1994 had at least one returned item, by customer region?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For each customer region, of the orders placed in 1994, what share included at least one returned line item? Count orders, not items.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the quality team:
+
+> For orders dated on or after 1994-01-01 and before 1995-01-01, report per region of the customer's nation the number of orders with at least one line item whose return flag is 'R', divided by the number of orders.
+
+Requirements:
+
+- A share of orders, not of line items.
+- Do not round.
+- Return exactly two columns, in this order: region, share of orders (a fraction between 0 and 1). Sort by region.
+'''

@@ -1,0 +1,43 @@
+id = "g06"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Grain, first published 2026-11-01; drafted by Claude Opus 5.5, reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7 (questions/README.md). Trap: joining part-supplier stock to the 1995 line items repeats each stock record once per sale, multiplying the total (91,817,271 instead of 19,634,344). Sold means on any supplier's order placed in 1995 (sold by that German supplier would give 13,724,020; the terse brief rules it out); stock means available units, not value."
+target_sql = '''
+SELECT sum(ps_availqty) AS stock
+FROM partsupp
+JOIN supplier ON s_suppkey = ps_suppkey
+JOIN nation ON n_nationkey = s_nationkey
+WHERE n_name = 'GERMANY'
+  AND EXISTS (SELECT 1 FROM lineitem JOIN orders ON o_orderkey = l_orderkey
+              WHERE l_partkey = ps_partkey
+                AND o_orderdate >= DATE '1995-01-01' AND o_orderdate < DATE '1996-01-01')
+'''
+
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["stock"]
+label_columns = []
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many units of stock do our German suppliers hold of parts that were on any supplier's orders placed in 1995?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I want the total available quantity that our German suppliers hold, counting only parts that were on at least one order placed in 1995 (from any supplier). Count each supplier's stock of a part once.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the supply team:
+
+> Sum the available quantity of part-supplier records whose supplier's nation is GERMANY and whose part appears on at least one line item of an order dated on or after 1995-01-01 and before 1996-01-01.
+
+Requirements:
+
+- Each part-supplier record counts once.
+- Return exactly one column: total available quantity.
+'''

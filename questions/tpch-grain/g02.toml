@@ -1,0 +1,47 @@
+id = "g02"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Grain, first published 2026-11-01; drafted by Claude Opus 5.5, reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7 (questions/README.md). Trap: averaging order totals gives the average order, not the average customer (AFRICA 140,675 instead of 365,346). The customer's 1997 total must be summed first, then averaged over the customers who ordered. Spend means the sum of order totals (o_totalprice); region is the customer's."
+target_sql = '''
+WITH spend AS (
+  SELECT o_custkey, sum(o_totalprice) AS total
+  FROM orders
+  WHERE o_orderdate >= DATE '1997-01-01' AND o_orderdate < DATE '1998-01-01'
+  GROUP BY o_custkey)
+SELECT r_name AS region, avg(total) AS avg_customer_spend
+FROM spend
+JOIN customer ON c_custkey = o_custkey
+JOIN nation ON n_nationkey = c_nationkey
+JOIN region ON r_regionkey = n_regionkey
+GROUP BY r_name
+ORDER BY region
+'''
+
+# The columns that answer the question; the target's other columns are labels.
+answer_columns = ["avg_customer_spend"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Among customers who ordered in 1997, what was the average customer's total of order totals that year, by customer region?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I want to know what a typical customer is worth per year. For each customer region, take the customers who placed at least one order in 1997, add up each customer's 1997 order totals, and give me the average of those customer totals.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the customer insights team:
+
+> For each customer with at least one order dated on or after 1997-01-01 and before 1998-01-01, compute the sum of total price over those orders. Report, per region of the customer's nation, the average of these per-customer sums.
+
+Requirements:
+
+- Average over customers, not over orders.
+- Do not round.
+- Return exactly two columns, in this order: region, average customer spend. Sort by region.
+'''

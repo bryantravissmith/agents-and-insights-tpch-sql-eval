@@ -22,7 +22,7 @@ from .grading import CORRECT, EXACT_COLUMNS
 from .report import LEVELS, cell, load_rows, question_sets
 
 SEED, DRAWS = 20261031, 2000
-SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard", "tpch-hard-v2"]
+SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard", "tpch-hard-v2", "tpch-grain"]
 
 # Grading rules, from each run's verdict (see evalkit/grading.py); a run passes only with a submitted query.
 #   correct        the headline: every column the reference asks for, with the right values. Extra columns,

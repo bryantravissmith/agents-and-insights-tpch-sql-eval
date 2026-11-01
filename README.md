@@ -7,6 +7,7 @@ What is in the box:
 - `questions/tpch/`: the 22 TPC-H questions rewritten in business English, each at three levels, with the shared tool instructions in `preamble.md`.
 - `questions/tpch-novel/`: six questions written for this eval (first published 2026-10-31), each built around a common analytics trap. TPC-H is in every model's training data; these are the control.
 - `questions/tpch-hard/`: six harder novel questions (first published 2026-10-31) meant to separate the strongest models: gaps and islands, sessionization, running thresholds, an exclusive percentile, a comparable partial-year window, tied ranks.
+- `questions/tpch-grain/`: six questions (first published 2026-11-01) each built so the tempting first query has the wrong grain: averaging over lines instead of orders, over orders instead of customers, counting lines instead of customers or orders, dividing by 52 weeks, a join that multiplies stock. Their terse briefs pin every definition that is not about grain, so a miss is a grain mistake. Pair with `--declare-grain`.
 - `tpch/`: the 22 reference queries and their validated answers at scale factor 0.1, extracted from DuckDB's `tpch` extension (`tpch/extract_tpch.py`).
 - `evalkit/`, `evals.py`: the runner, the harness adapters and the execution grader. `sqlguard.py`, `mcp_server.py`, `extensions/duckdb-tools.ts`: the two read-only tools every agent gets.
 
