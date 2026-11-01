@@ -22,6 +22,9 @@ the other; the novel and hard question sets, published after every model here wa
   measures how often a model lands on the reference's choices by coincidence.
 - `schema_before_discovery`: the agent's first query names TPC-H columns before any SHOW, DESCRIBE or catalog
   query, although the brief says it has not seen the database. Dataset familiarity, not question recall.
+- `comma_joins`: the submitted SQL joins tables with commas (`FROM lineitem, orders WHERE ...`), the 1990s style
+  of the published TPC-H queries (17 of the 22 references here). Rarely written today, so an agent that uses it
+  on TPC-H questions and not on novel ones is reproducing the benchmark's text, style included.
 """
 
 from __future__ import annotations
@@ -54,6 +57,9 @@ _TPCH_COLUMN = re.compile(
     r"\b(?:c|o|l|p|ps|s|n|r)_(?:custkey|orderkey|partkey|suppkey|nationkey|regionkey|name|extendedprice|discount|shipdate|commitdate|receiptdate|orderdate|orderstatus|mktsegment|acctbal|returnflag|linestatus|quantity|tax|totalprice|orderpriority|shipmode|supplycost|availqty|brand|type|size|container|retailprice|comment|phone|address|clerk|shippriority|shipinstruct|linenumber|mfgr)\b",
     re.IGNORECASE,
 )
+# A table, an optional alias, then a comma and another table: an implicit join. Matched on code with string
+# literals and comments removed, so 'a, b' in a string or a comment is not a join.
+COMMA_JOIN = re.compile(r"\bFROM\s+\w+(?:\s+(?:AS\s+)?(?!WHERE\b|JOIN\b|ON\b)\w+)?\s*,\s*\w+", re.IGNORECASE)
 _BENCHMARK = re.compile(r"\bTPC[- ]?H\b|\bTPCH\b|\bbenchmark", re.IGNORECASE)
 _QUERY_NUMBER = re.compile(
     # "TPC-H Q21", "TPC-H query 21", "query 21 of TPC-H"; a bare "Q4" is usually a quarter.
@@ -210,11 +216,13 @@ def exposure(run_dir: Path, task_id: str, markers: set[str]) -> dict:
         distinctive and _norm(title) in _norm(message)
     )
     first = next((s for _, s in entries), "")
+    submitted = answer.read_text(errors="replace") if answer.exists() else ""
     return {
         "names_benchmark": bool(_BENCHMARK.search(message)),
         "names_query": names_query,
         "recall_markers": markers_in(sql, markers),
         "schema_before_discovery": bool(first and _TPCH_COLUMN.search(scan(first)[0]) and not _DISCOVERY.search(first)),
+        "comma_joins": bool(COMMA_JOIN.search(scan(submitted)[0])),
     }
 
 
@@ -300,6 +308,7 @@ _EXPOSURE = {
     "reference column names": lambda a: any(m.startswith("alias:") for m in a["recall_markers"]),
     "reference constants": lambda a: any(m.startswith(("str:", "num:")) for m in a["recall_markers"]),
     "schema before discovery": lambda a: bool(a["schema_before_discovery"]),
+    "TPC-H's comma joins": lambda a: bool(a.get("comma_joins")),
 }
 
 
@@ -406,4 +415,6 @@ def flagged_markdown(audited: list[dict]) -> str:
         out.append("")
     out += ["## Recall markers", "", "Run, then the reference-query details its SQL reproduced.", ""]
     out += [f"- `{a['run_dir']}`: {', '.join(a['recall_markers'])}" for a in audited if a["recall_markers"]]
+    out += ["", "## Comma joins", "", "Runs whose submitted SQL (`answer.sql`) joins tables with commas.", ""]
+    out += [f"- `{a['run_dir']}` ({a['set']})" for a in audited if a.get("comma_joins")]
     return "\n".join(out) + "\n"

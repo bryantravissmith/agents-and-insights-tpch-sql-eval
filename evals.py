@@ -17,6 +17,7 @@
   uv run evals.py audit <batch id> [<batch id> ...] --out audit/                        # cheating + prior exposure
   uv run evals.py findings <batch id> [<batch id> ...] --out findings/ --audit audit/   # claims, with intervals
   uv run evals.py regrade <batch id> [...] --questions questions/tpch-novel-v2 --name X  # new reference, same runs
+  uv run evals.py style <batch id> [<batch id> ...] --out style/                       # SQL style, dialect stumbles
   uv run evals.py harnesses                                                           # what is installed
 
 Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
@@ -42,6 +43,7 @@ from evalkit import (
     regrade,
     report,
     run_grid,
+    style,
     summarize,
 )
 from evalkit.runner import DB, new_batch_id, reparse, resume
@@ -160,6 +162,10 @@ def main(argv=None) -> int:
     p.add_argument("--out", type=Path, required=True, help="folder for findings.md, findings.json, terse-misses.md")
     p.add_argument("--audit", type=Path, required=True, help="the audit folder (its runs.jsonl) for these batches")
 
+    p = sub.add_parser("style", help="SQL style and dialect stumbles by model maker and question set")
+    p.add_argument("batches", nargs="+", help="batch ids (folder names under results/)")
+    p.add_argument("--out", type=Path, required=True, help="folder for summary.md and runs.jsonl")
+
     p = sub.add_parser("regrade", help="grade saved runs against new question versions with the same prompts")
     p.add_argument("batches", nargs="+", help="batch ids whose runs to re-grade")
     p.add_argument("--questions", type=Path, nargs="+", required=True, help="the new question files or folders")
@@ -182,6 +188,10 @@ def main(argv=None) -> int:
     if args.cmd == "findings":
         findings.run_findings(args.batches, args.out, audit_runs=args.audit / "runs.jsonl")
         print(f"wrote {args.out}/findings.md, findings.json and terse-misses.md")
+        return 0
+    if args.cmd == "style":
+        done = style.run_style_report(args.batches, args.out)
+        print(f"styled {done['runs']} runs; see {done['out_dir']}/summary.md")
         return 0
     if args.cmd == "regrade":
         regrade.regrade(args.batches, args.questions, args.name)

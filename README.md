@@ -35,6 +35,7 @@ uv run evals.py report <batch> [<batch> ...] --csv report.csv   # accuracy + eff
 uv run evals.py audit <batch> [<batch> ...] --out audit/        # cheating attempts and prior exposure
 uv run evals.py findings <batch> [...] --out findings/ --audit audit/   # claims with intervals over questions
 uv run evals.py regrade <batch> [...] --questions questions/tpch-novel-v2 --name novel-v2   # new key, same runs
+uv run evals.py style <batch> [<batch> ...] --out style/        # SQL style and dialect stumbles by maker and set
 ```
 
 `report` reads every current run of the batches and prints strict (and lenient) accuracy by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
@@ -42,13 +43,15 @@ uv run evals.py regrade <batch> [...] --questions questions/tpch-novel-v2 --name
 `audit` reads the same runs for two things a score does not show, and writes the evidence for review: `summary.md` (rates by agent and question set), `flagged.md` (every flagged run with the SQL or message that triggered it), `runs.jsonl` (every signal for every run) and `markers.json` (what counts as recall for each question and level). The rules are in `evalkit/audit.py`.
 
 - **Cheating attempts**, from every `run_sql` call in `queries.log`, refused ones included: reaching for the answer key (DuckDB's `tpch_queries()`, `tpch_answers()`, `PRAGMA tpch`, `dbgen`), reading files or attaching databases, probing the engine (`duckdb_extensions()`, `SET`, `INSTALL`), and tool calls the CLI denied. A `got through` column counts attempts that ran.
-- **Prior exposure**: naming TPC-H or the specific query in the final message (or asking the engine for it by number), and reproducing details of the reference query that the brief at that level leaves out and the data does not reveal (TPC-H's output names such as `numwait` and `custdist`, constants such as q22's country codes or q21's `LIMIT 100`). The novel questions, written after the models were trained, run through the same detector as the control.
+- **Prior exposure**: naming TPC-H or the specific query in the final message (or asking the engine for it by number), reproducing details of the reference query that the brief at that level leaves out and the data does not reveal (TPC-H's output names such as `numwait` and `custdist`, constants such as q22's country codes or q21's `LIMIT 100`), and submitting SQL in the published queries' 1990s comma-join style (`FROM lineitem, orders WHERE ...`, used by 17 of the 22 references). The novel and hard questions, written after the models were trained, run through the same detectors as the control.
 
 `findings` turns the batches into claims, each with a 95% interval from resampling questions (ten repeats of one question are not independent, and a set of six questions is a small sample): the spec-brief ceiling, the TPC-H minus novel gap at each level under three grading rules (strict; lenient, which also accepts extra columns; as-asked, which also accepts answers that left out reference columns), whether runs that reproduce the reference score more often within a question, per-question terse tables, how misses fail, how often repeats disagree, and cost per correct answer. It also writes `terse-misses.md`, a fixed sample of terse misses to read by hand. The rules are in `evalkit/findings.py`.
 
+`style` describes how each model family writes SQL and how often DuckDB rejects it, every table sliced by question set (TPC-H, novel, hard): queries, schema lookups and failed queries per run, DuckDB's error types, calls to functions DuckDB does not have, the share of submitted queries using each construct (comma joins, CTEs, window functions, `QUALIFY`, `EXTRACT` versus `year()`, `GROUP BY 1`, `NULLIF`, `ROUND` and more) and query length. A construct common on TPC-H and absent from the other sets is the benchmark's style, not the model's. The rules are in `evalkit/style.py`.
+
 `regrade` grades saved runs against new versions of their questions, matched by level and prompt hash, without running an agent: the reference is never shown to the agent, so a version that changes only the reference leaves every run as it was. It writes `results/regrade-<name>/`; each run keeps its prompt, graded SQL, query log and final message, and records the original grade and run. See `questions/README.md` for why the novel set has a v2.
 
-`experiments/full-grid-2026-10-31.sh` runs `reparse`, `report`, `audit`, the novel v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
+`experiments/full-grid-2026-10-31.sh` runs `reparse`, `report`, `audit`, `style`, the novel v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
 
 From Python (a notebook, a script):
 

@@ -74,7 +74,12 @@ def test_exposure_signals(tmp_path):
         "names_query": True,
         "recall_markers": ["alias:numwait", "num:100"],
         "schema_before_discovery": False,
+        "comma_joins": False,
     }
+    # TPC-H's 1990s join style in the submitted query is its own signal.
+    (run / "answer.sql").write_text("SELECT s_name FROM supplier, nation WHERE s_nationkey = n_nationkey")
+    assert audit.exposure(run, "q21", set())["comma_joins"] is True
+    (run / "answer.sql").unlink()
     # A quarter is not a query number, and naming the schema TPC-H is not naming the query.
     (run / "final_message.txt").write_text("Assumed Q4 1993 is the order date; the schema is TPC-H style.")
     assert audit.exposure(run, "q04", set())["names_query"] is False
