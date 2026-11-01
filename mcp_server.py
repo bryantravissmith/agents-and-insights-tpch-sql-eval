@@ -9,8 +9,11 @@ Same two tools, same blocklist (sqlguard.py), same logging as extensions/duckdb-
   submit_sql(sql)  saves $AUDIT_OUT/answer.sql and runs it (evalkit re-executes answer.sql to grade)
                    with AUDIT_DECLARE=1 it also takes answer_columns, saved to answer_columns.json, and with
                    AUDIT_DECLARE_GRAIN=1 too, grain_columns (saved as {"answer": [...], "grain": [...]})
+  ask_clarification(question)  only with AUDIT_ASK=1: always the same non-answer (ASK_REPLY); each call is logged
+                   as an ASK entry in queries.log and appended to $AUDIT_OUT/asks.jsonl
 
-Env: AUDIT_DB (path to tpch.duckdb), AUDIT_OUT (run directory), AUDIT_DECLARE (1: declared answer columns).
+Env: AUDIT_DB (path to tpch.duckdb), AUDIT_OUT (run directory), AUDIT_DECLARE (1: declared answer columns),
+AUDIT_DECLARE_GRAIN (1: and the grain), AUDIT_ASK (1: offer ask_clarification).
 Run: uv run mcp_server.py        (stdio transport; the CLIs launch it themselves)
 """
 
@@ -33,6 +36,9 @@ MAX_ROWS = 50
 DECLARE = os.environ.get("AUDIT_DECLARE") == "1"
 # ... and also the grain: the names of the columns that identify one row of the result.
 GRAIN = os.environ.get("AUDIT_DECLARE_GRAIN") == "1"
+# Batches run with allow_ask: the agent may ask a clarifying question. Nobody answers; the call is what we observe.
+ASK = os.environ.get("AUDIT_ASK") == "1"
+ASK_REPLY = "No clarification is available. Use your best judgement, and state your assumptions in your final message."
 
 mcp = FastMCP("audit")
 
@@ -150,6 +156,24 @@ else:
         """Submit your FINAL answer. Saves the query and executes it to confirm it runs.
         Call exactly once, when you are confident the query is correct. Then state your assumptions and stop."""
         return _submit(sql, None)
+
+
+def _ask(question: str) -> str:
+    os.makedirs(OUT, exist_ok=True)
+    # One line in queries.log, so a question can never look like an entry's end (";") or another entry's header.
+    _log("ASK", " ".join(question.split()))
+    with open(os.path.join(OUT, "asks.jsonl"), "a") as f:
+        f.write(json.dumps({"at": datetime.now(UTC).isoformat(), "question": question}) + "\n")
+    return ASK_REPLY
+
+
+if ASK:
+
+    @mcp.tool()
+    def ask_clarification(question: str) -> str:
+        """Ask the person who made the request a clarifying question, before you answer.
+        question: what you need to know, e.g. which of two definitions they mean."""
+        return _ask(question)
 
 
 if __name__ == "__main__":

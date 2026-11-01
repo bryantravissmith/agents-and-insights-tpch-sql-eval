@@ -38,6 +38,7 @@ uv run evals.py findings <batch> [...] --out findings/ --audit audit/   # claims
 uv run evals.py regrade <batch> [...] --questions questions/tpch-novel-v2 --name novel-v2   # new key, same runs
 uv run evals.py style <batch> [<batch> ...] --out style/        # SQL style and dialect stumbles by maker and set
 uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --declare-columns   # agents name their answer columns
+uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --allow-ask         # agents may ask; nobody answers
 ```
 
 `report` reads every current run of the batches and prints accuracy (and lenient, which also counts right answers that were never submitted) by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
@@ -56,6 +57,8 @@ uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --declare-columns  
 **Declared answer columns** (`run --declare-columns`): `submit_sql` also takes the names of the result columns that answer the request. The grader pairs rows by the question's label columns, normalizing their form, and scores only the declared columns against the answer columns. See `questions/README.md`, "Answer, label and context columns", and `evalkit/declared.py`.
 
 **Declared grain** (`run --declare-grain`, which implies `--declare-columns`): `submit_sql` also takes `grain_columns`, the columns that identify one row of the result (empty for a single-row answer). The grain must be unique in the agent's own result (else `grain_not_unique`), and only those columns may pair rows with the reference's labels; a different number of rows is `grain_differs`. Both are wrong answers that name the error, so grain mistakes, the classic analysis bug, can be counted apart from wrong values.
+
+**Asking for clarification** (`run --allow-ask`, combinable with the declare flags): the agent also gets `ask_clarification(question)`, and the prompt says it may ask when the request is ambiguous. The tool always replies "No clarification is available. Use your best judgement, and state your assumptions in your final message.", so asking changes nothing but what we can observe. Each call is an `ASK` entry in `queries.log` (not counted as a query) and a line in `asks.jsonl`; `result.json` records `asks` (the number of calls) and `ask_questions` (the first 10). `findings` counts a tool call as asking, alongside questions in the final message.
 
 `experiments/full-grid-2026-10-31.sh` runs `reparse`, `rescore`, `report`, `audit`, `style`, the novel and hard v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
 
@@ -80,7 +83,7 @@ The model id is whatever that CLI calls it. Same model, different harness, e.g. 
 | --- | --- | --- | --- | --- | --- |
 | `pi` | `pi -p --mode json` | `extensions/duckdb-tools.ts`; `--no-builtin-tools --no-extensions --no-skills --no-context-files --no-mcp` | `--append-system-prompt` | yes (pi price table) | verified |
 | `codex` | `codex exec --json --ephemeral --ignore-user-config` | MCP; shell, browser, apps, web search, image tools disabled; read-only sandbox | `AGENTS.md` in cwd | tokens only | verified |
-| `agy` | `agy -p --output-format json --project aai-evals --sandbox` | MCP via a workspace plugin; project grants allow only the two tools, deny shell/file/web | `AGENTS.md` in cwd | tokens, priced from Google's list price (`evalkit/pricing.py`) | verified |
+| `agy` | `agy -p --output-format json --project aai-evals --sandbox` | MCP via a workspace plugin; project grants allow only the SQL tools (and `ask_clarification`, offered only with `--allow-ask`), deny shell/file/web | `AGENTS.md` in cwd | tokens, priced from Google's list price (`evalkit/pricing.py`) | verified |
 | `claude` | `claude -p --output-format json --tools ""` | MCP, `--strict-mcp-config`, `dontAsk`; `--bare` when `ANTHROPIC_API_KEY` is set, else `--setting-sources ""` | `--append-system-prompt-file` | the evaluated model's `modelUsage` cost, without Claude Code's own side calls; list price where Claude Code marks it `unknown` (Haiku 5.5) | verified on Sonnet 5.5 and Haiku 5.5 with API authentication |
 | `grok` | `grok -p --output-format streaming-messages-json` | MCP via trusted scratch config; built-ins removed; file/shell/web denied; compatibility discovery disabled | `AGENTS.md` in cwd | if reported | verified on 1.0.70 with Grok 4.7; native usage identifies `grok-4.7-build` |
 
@@ -153,6 +156,7 @@ results/<batch>/                       batch = YYYYMMDD-HHMMSS[-name]
     ├── transcript.jsonl  stderr.log   the CLI's own output
     ├── queries.log                    every statement the agent ran, in order; read this before the answer
     ├── answer.sql                     what it submitted (the grader re-executes it)
+    ├── asks.jsonl                     its ask_clarification questions (--allow-ask runs that asked)
     ├── final_message.txt              its closing message (assumptions)
     └── result.json                    verdict, detail, tokens, cost
 results/scorecard.csv                  one row per run, every batch (local, gitignored)
@@ -168,6 +172,7 @@ With a shell and DuckDB, an agent could run `LOAD tpch; SELECT * FROM tpch_answe
 | --- | --- | --- |
 | `run_sql` | executes one read-only statement, returns up to 50 rows as CSV, appends to `queries.log` | more than one statement; any statement that does not start with `SELECT`, `WITH`, `FROM`, `VALUES`, `TABLE`, `SHOW`, `DESCRIBE`, `SUMMARIZE`, `EXPLAIN` or `PIVOT` (so `INSTALL`, `LOAD`, `ATTACH`, `COPY`, `SET`, every write); `tpch_*`, `dbgen`, `read_*()`, `query()` and file paths anywhere outside comments |
 | `submit_sql` | saves `answer.sql` and runs it to confirm it executes | same |
+| `ask_clarification` | only with `--allow-ask`: records the question, always replies that no clarification is available | runs no SQL |
 
 Since harness v2 the guard strips comments and blanks string literals before it looks at keywords, so `replace(...)`, `LIKE '%set%'`, a `;` inside a string or a trailing `-- call it done` comment are no longer refused. `extensions/duckdb-tools.ts` carries a copy of `sqlguard.py`; `tests/test_sqlguard.py` runs both on the same SQL.
 

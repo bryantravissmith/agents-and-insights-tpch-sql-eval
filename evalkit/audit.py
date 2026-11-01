@@ -81,10 +81,11 @@ _ABBREV = {
 
 
 def _entries(run_dir: Path) -> list[tuple[str, str]]:
+    """(status, SQL) for every SQL tool call; ask_clarification's ASK entries hold a question, not SQL."""
     log = run_dir / "queries.log"
     if not log.exists():
         return []
-    return [(m.group(1), m.group(2)) for m in _ENTRY.finditer(log.read_text(errors="replace"))]
+    return [(m.group(1), m.group(2)) for m in _ENTRY.finditer(log.read_text(errors="replace")) if m.group(1) != "ASK"]
 
 
 def integrity(run_dir: Path, row: dict | None = None) -> dict:

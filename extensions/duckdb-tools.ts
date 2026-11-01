@@ -4,6 +4,9 @@
  * Exposes two tools and nothing else (run pi with --no-builtin-tools):
  *   run_sql(sql)    -> executes read-only, returns up to MAX_ROWS rows as CSV, logs the query
  *   submit_sql(sql) -> saves the final query to answer.sql and runs it (evalkit re-executes it to grade)
+ * and, only with AUDIT_ASK=1, a third:
+ *   ask_clarification(question) -> always the same non-answer (ASK_REPLY); logged as an ASK entry in queries.log
+ *                                  and appended to asks.jsonl
  *
  * Both refuse statements that could write, load extensions, or peek at the TPC-H answer key.
  * The guard between the sqlguard markers mirrors ../sqlguard.py (used by mcp_server.py and the grader).
@@ -13,6 +16,7 @@
  *   AUDIT_OUT      directory for queries.log / answer.* (default <sql-evals>/results/adhoc)
  *   AUDIT_DECLARE  1: submit_sql also takes answer_columns, saved to answer_columns.json
  *   AUDIT_DECLARE_GRAIN  1 (with AUDIT_DECLARE): also grain_columns, saved as {"answer": [...], "grain": [...]}
+ *   AUDIT_ASK      1: also register ask_clarification
  *
  * Requires the `duckdb` CLI on PATH (brew install duckdb).
  */
@@ -32,6 +36,10 @@ const OUT = resolve(process.env.AUDIT_OUT ?? resolve(HARNESS, "results", "adhoc"
 const DECLARE = process.env.AUDIT_DECLARE === "1";
 // ... and also the grain: the names of the columns that identify one row of the result.
 const GRAIN = process.env.AUDIT_DECLARE_GRAIN === "1";
+// Batches run with allow_ask: the agent may ask a clarifying question. Nobody answers; the call is what we observe.
+const ASK = process.env.AUDIT_ASK === "1";
+const ASK_REPLY =
+  "No clarification is available. Use your best judgement, and state your assumptions in your final message.";
 
 /** The column names in the header line of the duckdb CLI's CSV output (quoted names unquoted). */
 function csvHeader(out: string): string[] {
@@ -299,4 +307,26 @@ export default function (pi: any) {
       };
     },
   });
+
+  if (ASK) {
+    pi.registerTool({
+      name: "ask_clarification",
+      label: "Ask a clarifying question",
+      description:
+        "Ask the person who made the request a clarifying question, before you answer. " +
+        "question: what you need to know, e.g. which of two definitions they mean.",
+      parameters: Type.Object({
+        question: Type.String({ description: "What you need to know, e.g. which of two definitions they mean." }),
+      }),
+      async execute(_id: string, params: { question: string }) {
+        // One line in queries.log, so a question can never look like an entry's end (";") or another entry's header.
+        log("ASK", params.question.split(/\s+/).filter(Boolean).join(" "));
+        appendFileSync(
+          resolve(OUT, "asks.jsonl"),
+          JSON.stringify({ at: new Date().toISOString(), question: params.question }) + "\n",
+        );
+        return { content: [{ type: "text", text: ASK_REPLY }], details: {} };
+      },
+    });
+  }
 }

@@ -27,7 +27,12 @@ from .findings import SET_ORDER, maker
 from .report import load_rows, question_sets
 from .runner import HARNESS_DIR
 
-_ENTRY = re.compile(r"^-- \S+ (RUN|ERROR|REFUSED|SUBMIT)\b ?([^\n]*)\n(.*?)\n;\n", re.DOTALL | re.MULTILINE)
+# SQL tool calls only: ask_clarification's ASK entries (a question, not SQL) never match. The kind must be whole,
+# so REFUSED-SUBMIT and SUBMIT-ERROR (submit_sql calls) aren't read as a refused or a run_sql query.
+_ENTRY = re.compile(
+    r"^-- \S+ (RUN|ERROR|REFUSED|SUBMIT|SUBMIT-ERROR|REFUSED-SUBMIT)(?![\w-]) ?([^\n]*)\n(.*?)\n;\n",
+    re.DOTALL | re.MULTILINE,
+)
 _MISSING_FUNCTION = re.compile(
     r"(?:Scalar|Aggregate|Table) Function with name \"?(\w+)\"? does not exist", re.IGNORECASE
 )

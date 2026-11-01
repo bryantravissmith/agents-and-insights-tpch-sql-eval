@@ -23,6 +23,7 @@ HARNESS_DIR = Path(__file__).resolve().parent.parent
 MCP_SERVER = HARNESS_DIR / "mcp_server.py"
 PI_EXTENSION = HARNESS_DIR / "extensions" / "duckdb-tools.ts"
 TOOLS = ("run_sql", "submit_sql")
+ASK_TOOL = "ask_clarification"  # a third tool, only in batches run with allow_ask (AUDIT_ASK=1)
 
 
 @dataclass
@@ -38,12 +39,19 @@ class RunContext:
     extra_args: tuple[str, ...] = ()
     declare: bool = False  # submit_sql also takes answer_columns (see evalkit/declared.py)
     declare_grain: bool = False  # ... and grain_columns
+    allow_ask: bool = False  # the agent also gets ask_clarification, which never answers
+
+    @property
+    def tools(self) -> tuple[str, ...]:
+        """The tools this run's agent has."""
+        return TOOLS + ((ASK_TOOL,) if self.allow_ask else ())
 
     @property
     def tool_env(self) -> dict[str, str]:
         env = {"AUDIT_DB": str(self.db), "AUDIT_OUT": str(self.run_dir)}
         env |= {"AUDIT_DECLARE": "1"} if self.declare or self.declare_grain else {}
-        return env | ({"AUDIT_DECLARE_GRAIN": "1"} if self.declare_grain else {})
+        env |= {"AUDIT_DECLARE_GRAIN": "1"} if self.declare_grain else {}
+        return env | ({"AUDIT_ASK": "1"} if self.allow_ask else {})
 
     def mcp_server(self) -> dict:
         return {"command": "uv", "args": ["run", "--quiet", str(MCP_SERVER)], "env": self.tool_env}
@@ -189,7 +197,7 @@ class Claude(Harness):
             str(ctx.work_dir / "mcp.json"),
             "--strict-mcp-config",
             "--allowedTools",
-            ",".join(f"mcp__audit__{t}" for t in TOOLS),
+            ",".join(f"mcp__audit__{t}" for t in ctx.tools),
             "--permission-mode",
             "dontAsk",
             "--no-session-persistence",
@@ -349,6 +357,7 @@ class Grok(Harness):
         (ctx.work_dir / ".mcp.json").write_text(json.dumps({"mcpServers": {"audit": ctx.mcp_server()}}, indent=2))
 
     def command(self, ctx):
+        allow = [arg for t in ctx.tools for arg in ("--allow", f"MCPTool(audit__{t})")]
         return [
             "grok",
             "-p",
@@ -369,10 +378,7 @@ class Grok(Harness):
             "--disable-web-search",
             "--permission-mode",
             "bypassPermissions",
-            "--allow",
-            "MCPTool(audit__run_sql)",
-            "--allow",
-            "MCPTool(audit__submit_sql)",
+            *allow,
             "--deny",
             "Read",
             "--deny",
@@ -420,7 +426,8 @@ class Grok(Harness):
 class Antigravity(Harness):
     """Antigravity CLI (agy). It has no per-run MCP flag, so each work dir carries a workspace plugin
     (.agents/plugins/audit/) whose server agy names audit_audit. Permissions come from a dedicated agy
-    project, ~/.gemini/config/projects/aai-evals.json: allow the two tools, deny shell, file, web."""
+    project, ~/.gemini/config/projects/aai-evals.json: allow the SQL tools, deny shell, file, web. The project is
+    shared by every run, so it always allows ask_clarification too; the server offers it only with allow_ask."""
 
     name = "agy"
     binary = "agy"
@@ -438,7 +445,7 @@ class Antigravity(Harness):
             "permissionGrants": {
                 "v2Migrated": True,
                 "permissionGrants": {
-                    "allow": [f"mcp({self.SERVER}/{t})" for t in TOOLS],
+                    "allow": [f"mcp({self.SERVER}/{t})" for t in (*TOOLS, ASK_TOOL)],
                     "deny": [
                         "command(*)",
                         "unsandboxed(*)",

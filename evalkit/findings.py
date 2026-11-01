@@ -20,6 +20,7 @@ from pathlib import Path
 
 from .grading import CORRECT, EXACT_COLUMNS
 from .report import LEVELS, cell, load_rows, question_sets
+from .runner import asked
 
 SEED, DRAWS = 20261031, 2000
 SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard", "tpch-hard-v2", "tpch-grain"]
@@ -212,15 +213,25 @@ _ASKS = re.compile(
 
 
 def clarifications(rows: list[dict], root: Path) -> dict[tuple, Counter]:
-    """(maker, level) -> runs, runs that asked instead of submitting, runs that asked and submitted anyway."""
+    """(maker, level) -> runs, runs that asked instead of submitting, runs that asked and submitted anyway,
+    and runs that asked with the ask_clarification tool (`by_tool`, allow_ask batches only).
+
+    A run asked when its final message asks a question (`_ASKS`) or it called ask_clarification, before or while
+    submitting; either way it counts once in `instead` or `and_submitted`.
+    """
     out: dict[tuple, Counter] = defaultdict(Counter)
     for r in rows:
         if r.get("verdict") == "harness_error" or "regraded_from" in r:
             continue
         cell = out[(maker(r["agent"]), r["level"])]
         cell["runs"] += 1
-        final = root / r["run_dir"] / "final_message.txt"
-        if final.exists() and _ASKS.search(final.read_text(errors="replace")):
+        run_dir = root / r["run_dir"]
+        # Scorecard rows do not carry `asks`; the run's own record of its calls does.
+        by_tool = bool(int(r.get("asks") or 0) or asked(run_dir))
+        final = run_dir / "final_message.txt"
+        by_phrase = final.exists() and bool(_ASKS.search(final.read_text(errors="replace")))
+        cell["by_tool"] += by_tool
+        if by_tool or by_phrase:
             cell["and_submitted" if r.get("sql_source") == "submit" else "instead"] += 1
     return dict(out)
 
@@ -619,15 +630,17 @@ def markdown(f: dict) -> str:
             "A terse brief leaves definitions open on purpose. The intended definition is the rubric, so an agent"
             " that silently assumes another reasonable one is graded wrong; asking is the move the rung rewards in"
             " principle. A run is headless, though: nobody answers, and the shared preamble tells the agent to"
-            " submit and state its assumptions. `asked instead` ended with a question and no submitted query;"
-            " `asked and submitted` asked a question but submitted anyway. Matched by phrases (`_ASKS`)."
+            " submit and state its assumptions. `asked instead` asked a question and submitted no query;"
+            " `asked and submitted` asked a question but submitted anyway. A question is one the final message asks"
+            " (matched by phrases, `_ASKS`) or an `ask_clarification` call, which batches run with `--allow-ask`"
+            " offer and which always answers that no clarification is available; `asked by tool` counts those calls."
         ),
         "",
-        "| maker | level | runs | asked instead | asked and submitted |",
-        "|---|---|---|---|---|",
+        "| maker | level | runs | asked instead | asked and submitted | asked by tool |",
+        "|---|---|---|---|---|---|",
     ]
     for (m, lv), c in sorted(f["asks"].items(), key=lambda kv: (kv[0][0], LEVELS.index(kv[0][1]))):
-        out.append(f"| {m} | {lv} | {c['runs']} | {c['instead']} | {c['and_submitted']} |")
+        out.append(f"| {m} | {lv} | {c['runs']} | {c['instead']} | {c['and_submitted']} | {c['by_tool']} |")
     return "\n".join(out) + "\n"
 
 

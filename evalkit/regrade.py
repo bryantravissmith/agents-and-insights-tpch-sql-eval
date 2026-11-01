@@ -24,7 +24,15 @@ from .declared import read_declaration as recorded_declaration
 from .runner import COLS, RESULTS, _git_state, _log_entries, _sha256, write_manifest
 from .tasks import load_questions
 
-COPIED = ("prompt.md", "answer.sql", "answer_columns.json", "queries.log", "final_message.txt", "meta.json")
+COPIED = (
+    "prompt.md",
+    "answer.sql",
+    "answer_columns.json",
+    "queries.log",
+    "asks.jsonl",
+    "final_message.txt",
+    "meta.json",
+)
 
 
 def graded_sql(run_dir: Path) -> tuple[str | None, str]:

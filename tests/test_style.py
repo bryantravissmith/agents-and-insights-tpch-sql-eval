@@ -51,6 +51,12 @@ def test_run_style_counts_dialect_stumbles_and_constructs(tmp_path):
     assert s["missing_functions"] == ["to_char"]
     assert set(s["constructs"]) == {"comma joins (FROM a, b)", "year() / month()", "GROUP BY position (GROUP BY 1)"}
     assert s["answer_lines"] == 3 and s["submitted"]
+    # A refused or failed submit_sql call is not a run_sql query.
+    submits = "-- 2026-10-31T20:00:06Z REFUSED-SUBMIT blocked\nDROP TABLE x\n;\n\n"
+    submits += "-- 2026-10-31T20:00:07Z SUBMIT-ERROR Parser Error\nSELEC 1\n;\n\n"
+    _run(tmp_path / "s", LOG + submits, None)
+    s = style.run_style(tmp_path / "s")
+    assert (s["queries"], s["failed"], s["refused"]) == (5, 2, 1)
     _run(tmp_path / "none", "", None)  # no log, no submission
     assert style.run_style(tmp_path / "none") | {} == style.run_style(tmp_path / "none")
     assert style.run_style(tmp_path / "none")["submitted"] is False

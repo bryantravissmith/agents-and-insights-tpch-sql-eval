@@ -2,6 +2,7 @@
 
 Layout of one run (results/<batch>/<task>-<level>-<condition>-<harness>-<model>-r<n>/):
   prompt.md  meta.json  transcript.jsonl  stderr.log  queries.log  answer.sql  final_message.txt  result.json
+  (asks.jsonl too, when a run with allow_ask called ask_clarification)
 The agent's cwd is an anonymous scratch dir outside the repo (AAI_WORK_ROOT, default $TMPDIR/aai-evals).
 This prevents ancestor context discovery; disabled tools and DuckDB restrictions enforce answer-key isolation.
 It is deleted after the run unless keep_work=True.
@@ -51,11 +52,39 @@ DECLARE_GRAIN_INSTRUCTION = (
 )
 
 
+# ... with allow_ask (after the declare instruction when both are on, in the same paragraph).
+ASK_INSTRUCTION = "If the request is ambiguous, you may call `ask_clarification` with your question before you answer."
+
+
+# Run options that add an instruction to the prompt (see `instructed`), and so change prompt_sha.
+PROMPT_OPTIONS = ("declare_columns", "declare_grain", "allow_ask")
+
+
 def declaring(tasks: list[Task], grain: bool = False) -> list[Task]:
     """The tasks with the declare instruction added to each prompt (so it is part of prompt_sha)."""
-    text = DECLARE_GRAIN_INSTRUCTION if grain else DECLARE_INSTRUCTION
+    return instructed(tasks, declare_columns=True, declare_grain=grain)
+
+
+def instructed(
+    tasks: list[Task], *, declare_columns: bool = False, declare_grain: bool = False, allow_ask: bool = False
+) -> list[Task]:
+    """The tasks with the run options' instructions added after each brief (so they are part of prompt_sha).
+
+    run_grid and resume both compose prompts here, so a resumed batch hashes to what it ran.
+    """
+    parts = []
+    if declare_columns or declare_grain:
+        parts.append(DECLARE_GRAIN_INSTRUCTION if declare_grain else DECLARE_INSTRUCTION)
+    if allow_ask:
+        parts.append(ASK_INSTRUCTION)
+    if not parts:
+        return list(tasks)
+    text = " ".join(parts)
     return [replace(t, prompt=f"{t.prompt}\n\n{text}") for t in tasks]
 
+
+# result.json keeps at most this many of a run's questions; asks.jsonl keeps them all.
+MAX_ASK_QUESTIONS = 10
 
 RESULTS = HARNESS_DIR / "results"
 SCORECARD = RESULTS / "scorecard.csv"
@@ -210,7 +239,7 @@ def new_batch_id(name: str | None = None) -> str:
 
 def _log_entries(run_dir: Path) -> list[tuple[str, str]]:
     """(kind, sql) for each tool call. Entries are "-- <timestamp> <KIND> [note]\n<sql>\n;\n\n",
-    KIND in RUN, ERROR, REFUSED, SUBMIT, SUBMIT-ERROR, REFUSED-SUBMIT."""
+    KIND in RUN, ERROR, REFUSED, SUBMIT, SUBMIT-ERROR, REFUSED-SUBMIT, and ASK (whose body is the question)."""
     path = run_dir / "queries.log"
     if not path.exists():
         return []
@@ -225,6 +254,20 @@ def _log_entries(run_dir: Path) -> list[tuple[str, str]]:
     if kind:
         entries.append((kind, "\n".join(body).strip().removesuffix(";").strip()))
     return entries
+
+
+def asked(run_dir: Path) -> list[str]:
+    """The questions a run asked with ask_clarification, in order: asks.jsonl, else the log's ASK entries."""
+    path = run_dir / "asks.jsonl"
+    if path.exists():
+        out = []
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                out.append(str(json.loads(line).get("question", "")))
+            except (json.JSONDecodeError, AttributeError):
+                continue
+        return out
+    return [body for kind, body in _log_entries(run_dir) if kind == "ASK"]
 
 
 def _launch(cmd: list[str], ctx: RunContext, env: dict, timeout_s: int) -> tuple[int | None, bool]:
@@ -325,13 +368,15 @@ def run_one(
     record: bool = True,
     declare_columns: bool = False,
     declare_grain: bool = False,
+    allow_ask: bool = False,
 ) -> RunResult:
     """One headless agent session on one task, graded against task.target_sql.
 
     The database is the task's own (a question file's `db`), else `db`, else tpch.duckdb. With
     `declare_columns`, submit_sql also takes the answer's column names and the run is graded by them
-    (`declared.grade_task`); `declare_grain` adds the grain. The task's prompt must already ask for them
-    (see `declaring`).
+    (`declared.grade_task`); `declare_grain` adds the grain. With `allow_ask`, the agent also has
+    ask_clarification, which never answers; result.json records how often it asked and what. The task's
+    prompt must already carry the matching instructions (see `instructed`).
     """
     agent = Agent.parse(agent)
     db = resolve_db(task, db)
@@ -368,6 +413,7 @@ def run_one(
         extra_args=agent.extra_args,
         declare=declare_columns,
         declare_grain=declare_grain,
+        allow_ask=allow_ask,
     )
     res = RunResult(
         batch=batch,
@@ -447,6 +493,7 @@ def run_one(
         res.detail = res.usage.error
     kinds = Counter(kind for kind, _ in entries)
     res.queries_run, res.submits = kinds["RUN"], kinds["SUBMIT"]
+    questions = asked(run_dir)
 
     (run_dir / "result.json").write_text(
         json.dumps(
@@ -456,6 +503,8 @@ def run_one(
                 "column_map": g.column_map,
                 "reference": res.reference,  # 0 = the target; n = the nth accepted alternative
                 "declaration": declaration,  # declared answer columns and how they lined up ({} if none)
+                "asks": len(questions),  # ask_clarification calls (allow_ask batches only)
+                "ask_questions": questions[:MAX_ASK_QUESTIONS],
                 "usage_extra": res.usage.extra,
             },
             indent=2,
@@ -683,8 +732,7 @@ def resume(
     manifest = json.loads((batch_dir / "manifest.json").read_text())
     loaded = load_questions(*(questions or [HARNESS_DIR / "questions"]))
     opts = manifest["run_options"]
-    if opts.get("declare_columns") or opts.get("declare_grain"):
-        loaded = declaring(loaded, grain=bool(opts.get("declare_grain")))
+    loaded = instructed(loaded, **{k: bool(opts.get(k)) for k in PROMPT_OPTIONS})
     by_key = {(t.id, t.level): t for t in loaded}
     tasks = []
     for spec in manifest["tasks"]:
@@ -702,7 +750,7 @@ def resume(
     run_kw = {
         k: v
         for k, v in manifest["run_options"].items()
-        if k in ("timeout_s", "max_turns", "keep_work", "record", "declare_columns", "declare_grain")
+        if k in ("timeout_s", "max_turns", "keep_work", "record", *PROMPT_OPTIONS)
     }
     plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in planned]
 
@@ -877,8 +925,7 @@ def run_grid(
     """
     agents = [Agent.parse(a) for a in agents]
     conditions = list(conditions)
-    if run_kw.get("declare_columns") or run_kw.get("declare_grain"):
-        tasks = declaring(tasks, grain=bool(run_kw.get("declare_grain")))
+    tasks = instructed(tasks, **{k: bool(run_kw.get(k)) for k in PROMPT_OPTIONS})
     preflight(tasks, agents, conditions, db, allow_leaky)
     batch = batch or new_batch_id()
     plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in agents]

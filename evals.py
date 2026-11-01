@@ -76,6 +76,11 @@ def _grid_args(p: argparse.ArgumentParser):
         action="store_true",
         help="as --declare-columns, plus the grain: the columns that identify one row (a different prompt again)",
     )
+    p.add_argument(
+        "--allow-ask",
+        action="store_true",
+        help="agents also get ask_clarification, which never answers; result.json counts the asks (a different prompt)",
+    )
     _db_arg(p)
 
 
@@ -120,6 +125,7 @@ def _grid(tasks, args):
         dry_run=args.dry_run,
         declare_columns=args.declare_columns,
         declare_grain=args.declare_grain,
+        allow_ask=args.allow_ask,
     )
     return 0 if results or args.dry_run else 1
 
