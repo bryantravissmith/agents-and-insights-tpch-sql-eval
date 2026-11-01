@@ -23,7 +23,17 @@ from .report import LEVELS, cell, load_rows, question_sets
 from .runner import asked
 
 SEED, DRAWS = 20261031, 2000
-SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard", "tpch-hard-v2", "tpch-grain"]
+SET_ORDER = [
+    "tpch",
+    "tpch-novel",
+    "tpch-novel-v2",
+    "tpch-hard",
+    "tpch-hard-v2",
+    "tpch-grain",
+    "tpch-v3",
+    "tpch-novel-v3",
+    "tpch-hard-v3",
+]
 
 # Grading rules, from each run's verdict (see evalkit/grading.py); a run passes only with a submitted query.
 #   correct        the headline: every column the reference asks for, with the right values. Extra columns,

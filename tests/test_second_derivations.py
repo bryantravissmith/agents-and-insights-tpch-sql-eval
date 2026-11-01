@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from evalkit import load_questions
-from evalkit.grading import grade_sql
+from evalkit.grading import grade_any, grade_sql
 from evalkit.runner import DB
 
 HERE = Path(__file__).resolve().parent.parent
@@ -171,6 +171,48 @@ WHERE ps.ps_suppkey IN (SELECT s_suppkey FROM supplier, nation WHERE n_nationkey
   AND ps.ps_partkey IN (SELECT l_partkey FROM sold)
 """,
 }
+
+
+# v3 changed two definitions (questions/README.md, "Version 3"): h04's order size is the order's total price, and
+# an h02 spree needs at least 2 orders. Their second queries take other routes again: h04 indexes a sorted list
+# instead of window row numbers; h02 counts run starts whose next order is within 30 days instead of run ids.
+SECOND_V3 = {
+    "h04": """
+WITH ok AS (
+  SELECT o_custkey, o_totalprice::DOUBLE v FROM orders
+  WHERE o_orderdate BETWEEN DATE '1994-01-01' AND DATE '1994-12-31'
+    AND o_orderkey NOT IN (SELECT l_orderkey FROM lineitem WHERE l_returnflag = 'R')),
+g AS (
+  SELECT r_name reg, list_sort(list(v)) xs, count(*) n
+  FROM ok JOIN customer ON c_custkey = o_custkey JOIN nation ON n_nationkey = c_nationkey
+  JOIN region ON r_regionkey = n_regionkey GROUP BY 1),
+p AS (SELECT reg, n, xs, 0.9 * (n + 1) h FROM g)
+SELECT reg, n, xs[floor(h)::INT] + (h - floor(h)) * (xs[ceil(h)::INT] - xs[floor(h)::INT]) FROM p ORDER BY 1
+""",
+    "h02": """
+WITH o AS (
+  SELECT c_mktsegment s, o_orderdate d, lag(o_orderdate) OVER w p, lead(o_orderdate) OVER w nx,
+         lead(o_orderdate, 2) OVER w nx2
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE year(o_orderdate) IN (1996, 1997)
+  WINDOW w AS (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey)),
+f AS (SELECT *, (p IS NULL OR d - p > 30) AND nx - d <= 30 AS starts FROM o)
+SELECT s, count(*) FILTER (WHERE starts) AS sprees,
+       count(*) FILTER (WHERE starts AND nx2 - nx <= 30) AS three_plus,
+       (count(*) FILTER (WHERE d - p <= 30 OR nx - d <= 30))::DOUBLE / count(*) FILTER (WHERE starts) AS avg_orders
+FROM f GROUP BY 1 ORDER BY 1
+""",
+}
+
+
+@pytest.mark.skipif(not DB.exists(), reason="needs tpch.duckdb (uv run setup_db.py)")
+@pytest.mark.parametrize("qid", sorted(q for q in SECOND if q[0] in "nh"))
+def test_v3_target_matches_second_derivation(qid):
+    folder = {"n": "tpch-novel-v3", "h": "tpch-hard-v3"}[qid[0]]
+    (task,) = load_questions(HERE / "questions" / folder / f"{qid}.toml", levels=["spec"])
+    # With the accepted forms, as a run is graded: n04's second query gives the month as 'YYYY-MM'.
+    g, _ = grade_any(SECOND_V3.get(qid, SECOND[qid]), task.target_sql, task.accepted_sql, DB)
+    assert g.correct, f"{qid}v3: {g.verdict} {g.detail}"
 
 
 @pytest.mark.skipif(not DB.exists(), reason="needs tpch.duckdb (uv run setup_db.py)")

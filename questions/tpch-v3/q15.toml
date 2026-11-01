@@ -1,0 +1,35 @@
+id = "q15v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Top supplier. Supplier(s) at MAX revenue; the per-supplier revenue must be reused for both the max and the final select. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q15.sql"
+
+# The columns that answer the question.
+answer_columns = [["s_suppkey", "s_name"]]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
+[[levels]]
+name = "terse"
+prompt = '''
+Who was our top supplier in Q1 1996?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Who was our top supplier by revenue for line items shipped January through March 1996? Revenue is price after discount. If several suppliers tie for the top, show all of them. Show supplier key, name, address, phone and revenue.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the supplier management team:
+
+> For line items shipped on or after 1996-01-01 and before 1996-04-01, compute each supplier's revenue as the sum of extended price * (1 - discount). Return the supplier or suppliers whose revenue equals the maximum.
+
+Requirements:
+
+- Return the supplier key, supplier name, address, phone and revenue.
+- Give revenue to at least two decimal places.
+'''

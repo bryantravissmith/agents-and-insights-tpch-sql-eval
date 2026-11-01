@@ -1,0 +1,32 @@
+id = "q14v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Promotion effect. CASE in the numerator only; ship-date month; result is a percentage 0-100. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q14.sql"
+
+# The columns that answer the question.
+answer_columns = ["promo_revenue"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+What share of September 1995 revenue came from promo parts?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Marketing wants the promotion effect for September 1995: of the revenue (price after discount) on line items shipped that month, what percentage came from parts whose type starts with PROMO? One number, as a percentage between 0 and 100.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the marketing team:
+
+> For line items shipped on or after 1995-09-01 and before 1995-10-01, compute 100 * (the sum of extended price * (1 - discount) for parts whose type starts with 'PROMO') / (the same sum over all of those line items).
+
+Requirements:
+
+- Give the percentage (0 to 100) to at least two decimal places.
+'''

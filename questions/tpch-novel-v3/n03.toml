@@ -1,0 +1,49 @@
+id = "n03v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Novel, first published 2026-10-31. Top customer per region by 1996 net revenue. Traps: region is reached through the customer's nation, not the supplier's; revenue is after discount; one row per region (no ties at SF 0.1). Terse key: Biggest by number of orders is a different reading, with four-way ties in three regions; it is not accepted. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. The reference also returns revenue as context, not required. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+WITH rev AS (
+  SELECT r_name, c_custkey, c_name, sum(l_extendedprice * (1 - l_discount)) AS revenue
+  FROM lineitem
+  JOIN orders ON o_orderkey = l_orderkey
+  JOIN customer ON c_custkey = o_custkey
+  JOIN nation ON n_nationkey = c_nationkey
+  JOIN region ON r_regionkey = n_regionkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1997-01-01'
+  GROUP BY r_name, c_custkey, c_name)
+SELECT r_name AS region, c_name AS customer, revenue
+FROM rev
+QUALIFY rank() OVER (PARTITION BY r_name ORDER BY revenue DESC) = 1
+ORDER BY region
+'''
+
+# The columns that answer the question.
+answer_columns = ["customer"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["region"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Who was our biggest customer in each region in 1996?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For the regional account reviews, I need our single biggest customer in each region for 1996. Biggest means the most revenue on orders placed in 1996, where revenue is price after discount summed over the order's items. A customer's region is where the customer is based. Give me region, customer name and that revenue.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the sales team:
+
+> For orders placed on or after 1996-01-01 and before 1997-01-01, compute each customer's revenue as the sum over their line items of extended price times (1 - discount). Assign each customer to the region of the customer's nation. For each region, return the customer with the highest revenue.
+
+Requirements:
+
+- One row per region; if customers tie for the top, return all of them.
+- Return the region name, customer name and revenue.
+'''

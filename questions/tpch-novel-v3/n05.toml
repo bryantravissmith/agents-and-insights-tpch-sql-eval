@@ -1,0 +1,43 @@
+id = "n05v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Novel, first published 2026-10-31. Trap: the average must include customers with zero 1995 orders (a third of customers never order). Averaging over customers who ordered gives about 2.64 instead of about 1.50. Terse key: Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+SELECT c_mktsegment AS segment,
+       count(o_orderkey) / count(DISTINCT c_custkey) AS avg_orders_per_customer
+FROM customer
+LEFT JOIN orders ON o_custkey = c_custkey
+  AND o_orderdate >= DATE '1995-01-01' AND o_orderdate < DATE '1996-01-01'
+GROUP BY c_mktsegment
+ORDER BY c_mktsegment
+'''
+
+# The columns that answer the question.
+answer_columns = ["avg_orders_per_customer"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["segment"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+What's the average number of orders per customer in 1995, by market segment?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I'm sizing the account-management workload. For each market segment, what's the average number of orders a customer placed in 1995? Average over every customer in the segment, so customers who placed no orders that year count as zero.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the account management team:
+
+> For each customer market segment, compute the average, over all customers in that segment, of the number of orders the customer placed with an order date on or after 1995-01-01 and before 1996-01-01. Customers with no such orders contribute 0 to the average.
+
+Requirements:
+
+- Give the average to at least two decimal places.
+- Return the segment and the average orders per customer.
+'''

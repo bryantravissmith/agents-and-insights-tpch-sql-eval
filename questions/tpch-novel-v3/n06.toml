@@ -1,0 +1,54 @@
+id = "n06v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Novel, first published 2026-10-31. Traps: 'first order' is the customer's first ever, not first in 1994 (filtering orders to 1994 before taking the minimum admits customers who ordered earlier); the 90-day window is relative to each customer's first order; same-day repeats do not count. Terse key: Intended: 'started with us in 1994' means the first ever order is in 1994, not the first order placed in 1994; 'came back within 90 days' means another order after the first order's date and no more than 90 days after it, day 90 included. Excluding day 90 is a reasonable reading that this rubric grades wrong (it changes HOUSEHOLD from 12 to 11). Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. The reference also returns cohort_customers as context, not required; checked when shown: cohort_customers. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+WITH firsts AS (
+  SELECT o_custkey, min(o_orderdate) AS first_date FROM orders GROUP BY o_custkey),
+cohort AS (
+  SELECT c_mktsegment, f.o_custkey, first_date
+  FROM firsts f JOIN customer ON c_custkey = f.o_custkey
+  WHERE first_date >= DATE '1994-01-01' AND first_date < DATE '1995-01-01')
+SELECT c_mktsegment AS segment,
+       count(*) AS cohort_customers,
+       count(*) FILTER (WHERE EXISTS (
+         SELECT 1 FROM orders o
+         WHERE o.o_custkey = cohort.o_custkey
+           AND o.o_orderdate > cohort.first_date
+           AND o.o_orderdate <= cohort.first_date + INTERVAL 90 DAY)) AS returned_within_90_days
+FROM cohort
+GROUP BY c_mktsegment
+ORDER BY c_mktsegment
+'''
+
+# The columns that answer the question.
+answer_columns = ["returned_within_90_days"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["segment"]
+# Context that must be right when an answer shows it.
+checked_columns = ["cohort_customers"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Of customers who started with us in 1994, how many came back within 90 days, by segment?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I'm looking at early retention. Take the customers whose very first order with us was placed in 1994. For each market segment, how many such customers are there, and how many of them placed another order within 90 days after that first order? An order on the same day as the first doesn't count as coming back.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the customer success team:
+
+> A customer's first order date is the minimum order date across all of that customer's orders. Take the customers whose first order date is on or after 1994-01-01 and before 1995-01-01. For each market segment, return the number of these customers, and the number of them who have at least one order with an order date strictly after their first order date and no more than 90 days after it.
+
+Requirements:
+
+- Count customers, not orders.
+- Return the segment, the customers in the cohort and the customers who returned within 90 days.
+'''

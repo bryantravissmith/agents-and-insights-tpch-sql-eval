@@ -1,0 +1,35 @@
+id = "q03v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Shipping priority. Three-way join, revenue per order, LIMIT 10 ordered by revenue desc then order date. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q03.sql"
+
+# The columns that answer the question.
+answer_columns = ["l_orderkey"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
+[[levels]]
+name = "terse"
+prompt = '''
+What are the 10 biggest unshipped orders from building customers as of March 15, 1995?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+As of March 15, 1995, which orders from customers in the BUILDING market segment still have the most revenue waiting to ship? Only orders placed before March 15, 1995 count, and only their line items that ship after that date. Revenue is price after discount. Give me the top 10 orders by that revenue, with the order date and shipping priority; break ties by the earlier order date.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the operations team:
+
+> For customers in the 'BUILDING' market segment, take orders placed strictly before 1995-03-15 and, within them, line items shipped strictly after 1995-03-15. For each order, compute revenue as the sum of extended price * (1 - discount) over those line items. Return the 10 orders with the highest revenue, breaking ties by earlier order date.
+
+Requirements:
+
+- Return the order key, revenue, order date and ship priority.
+- Give revenue to at least two decimal places.
+'''

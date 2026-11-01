@@ -1,0 +1,36 @@
+id = "q22v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Global sales opportunity. Country code = first two phone digits; average over POSITIVE balances in those codes; NOT EXISTS orders. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q22.sql"
+
+# The columns that answer the question.
+answer_columns = ["numcust"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["cntrycode"]
+# Context that must be right when an answer shows it.
+checked_columns = ["totacctbal"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many customers in our target countries have money on account but have never ordered?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Sales wants dormant customers worth calling in the countries whose phone country codes are 13, 31, 23, 29, 30, 18 and 17 (the first two digits of the phone number). Count customers in those codes who have never placed an order and whose account balance is above the average positive account balance of customers in those same codes. Per country code: the number of such customers and their total account balance, sorted by code.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the sales development team:
+
+> Treat the first two characters of a customer's phone number as its country code. Among customers whose country code is one of '13', '31', '23', '29', '30', '18', '17', compute the average account balance over those with a balance greater than 0. Then find the customers in those country codes whose balance is above that average and who have no orders at all. For each country code, return the number of such customers and the sum of their account balances.
+
+Requirements:
+
+- The average is a single number over all seven codes together, using only positive balances.
+'''

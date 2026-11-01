@@ -1,0 +1,33 @@
+id = "q08v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "National market share. CASE inside SUM; region applies to the customer, nation to the supplier; year from order date. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q08.sql"
+
+# The columns that answer the question.
+answer_columns = ["mkt_share"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+What was Brazil's market share in the Americas for economy anodized steel in 1995 and 1996?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For parts of type ECONOMY ANODIZED STEEL sold to customers in the AMERICA region on orders placed in 1995 and 1996: what fraction of that revenue (price after discount) came from suppliers based in Brazil? One row per order year, as a fraction between 0 and 1.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the market analysis team:
+
+> Consider line items for parts of type 'ECONOMY ANODIZED STEEL' on orders placed between 1995-01-01 and 1996-12-31 inclusive by customers whose nation is in the AMERICA region. For each year of the order date, compute the volume (extended price * (1 - discount)) supplied by suppliers located in BRAZIL divided by the total volume for that year.
+
+Requirements:
+
+- Return the year and the share.
+- Give the share as a fraction between 0 and 1, not a percentage, to at least two decimal places.
+'''

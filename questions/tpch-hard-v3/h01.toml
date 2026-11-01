@@ -1,0 +1,47 @@
+id = "h01v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31. Gaps and islands over calendar months, then a distribution. Traps: treating orders up to 31 days apart as consecutive months, or using the month number without the year, both shift the distribution. Terse key: Intended: consecutive calendar months, crossing year boundaries, over customers who have ordered. Day gaps (30 or 31 days) instead of calendar months are wrong. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+WITH m AS (
+  SELECT DISTINCT o_custkey, year(o_orderdate) * 12 + month(o_orderdate) AS mi FROM orders),
+g AS (
+  SELECT o_custkey, mi - row_number() OVER (PARTITION BY o_custkey ORDER BY mi) AS grp FROM m),
+runs AS (SELECT o_custkey, count(*) AS len FROM g GROUP BY o_custkey, grp),
+longest AS (SELECT o_custkey, max(len) AS longest FROM runs GROUP BY o_custkey)
+SELECT longest AS longest_streak_months, count(*) AS customers
+FROM longest
+GROUP BY longest
+ORDER BY longest
+'''
+
+# The columns that answer the question.
+answer_columns = ["customers"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["longest_streak_months"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+How consistent are our customers? Show how many customers have each longest run of back-to-back ordering months.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+I want to understand ordering habits. For every customer who has ever ordered, find their longest streak of consecutive calendar months in which they placed at least one order (for example, orders in March, April and May of the same year make a 3-month streak; December 1995 followed by January 1996 also counts as consecutive). Then give me the distribution: for each streak length, how many customers have that as their longest streak.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the customer insights team:
+
+> For each customer with at least one order, take the set of calendar months (year and month of the order date) in which the customer placed at least one order. A streak is a maximal run of consecutive calendar months in that set, where consecutive means the next month of the calendar, crossing year boundaries (1995-12 is followed by 1996-01). Compute each customer's longest streak length in months. Return, for each distinct longest-streak length, the number of customers whose longest streak has that length.
+
+Requirements:
+
+- Months are calendar months, not 30-day periods or gaps between order dates.
+- Each customer contributes exactly once, at their longest streak.
+- Return the longest streak length in months and the customer count.
+'''

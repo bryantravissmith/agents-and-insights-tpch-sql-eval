@@ -1,0 +1,35 @@
+id = "q02v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Minimum cost supplier. Correlated MIN(supply cost) subquery must keep the same region filter as the outer query. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q02.sql"
+
+# The columns that answer the question.
+answer_columns = ["s_name"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["p_partkey"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Which European suppliers should we buy size 15 brass parts from?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Procurement wants, for every size 15 part whose type ends in BRASS, the European supplier or suppliers offering it at the lowest supply cost. Lowest means compared with other suppliers in Europe, not worldwide; include every supplier tied at that minimum. Show supplier account balance, supplier name, nation, part number, part manufacturer, supplier address, phone and comment. Sort by account balance (highest first), then nation, supplier name and part number, and give me the top 100.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the procurement team:
+
+> Consider parts with size 15 whose type ends with 'BRASS'. For each such part, find the minimum supply cost among suppliers located in the EUROPE region, and return every European supplier whose supply cost for that part equals that minimum. Sort by supplier account balance descending, then nation name, supplier name and part key ascending, and keep the first 100 rows.
+
+Requirements:
+
+- The minimum is taken over suppliers in the EUROPE region only, separately for each part.
+- Return the supplier account balance, supplier name, nation name, part key, part manufacturer, supplier address, supplier phone and supplier comment.
+'''

@@ -1,0 +1,45 @@
+id = "n02v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Novel, first published 2026-10-31. Trap: a LEFT JOIN with the 1997 filter in WHERE turns into an inner join and returns nothing; customers who never ordered at all also count. Terse key: Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+SELECT n_name AS nation, count(*) AS customers_without_1997_orders
+FROM customer
+JOIN nation ON n_nationkey = c_nationkey
+JOIN region ON r_regionkey = n_regionkey
+WHERE r_name = 'EUROPE'
+  AND NOT EXISTS (SELECT 1 FROM orders WHERE o_custkey = c_custkey
+                  AND o_orderdate >= DATE '1997-01-01' AND o_orderdate < DATE '1998-01-01')
+GROUP BY n_name
+ORDER BY n_name
+'''
+
+# The columns that answer the question.
+answer_columns = ["customers_without_1997_orders"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["nation"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many of our European customers didn't order anything in 1997, by country?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+We're planning a win-back campaign in Europe. For each European country, how many of our customers placed no orders at all during 1997? Include customers who have never ordered from us. One row per country, alphabetical.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the marketing team:
+
+> For each nation in the region named 'EUROPE', count the customers of that nation who have no order with an order date on or after 1997-01-01 and before 1998-01-01. Customers with no orders at all are included in the count.
+
+Requirements:
+
+- Count customers, not orders.
+- Return the nation name and customer count.
+'''

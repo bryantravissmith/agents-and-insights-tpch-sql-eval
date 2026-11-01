@@ -1,0 +1,54 @@
+id = "h02v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31; v3 2026-11-01. Sessionization. A customer's 1996-1997 orders form runs: each order within 30 days of that customer's previous order stays in the run. A spree is a run of at least 2 orders. In v1 a lone order counted as a spree, which only 7% of terse runs assumed (83% required at least two orders), so v3 requires two. The gap stays open on the terse brief by design: 65% of terse runs used 7 days (about 400 sprees per segment instead of about 1,350). Traps: measuring the gap from the first order of the run rather than the previous order; using >= 30 instead of > 30 (about 2% fewer sprees); letting orders outside 1996-1997 start or extend runs; counting lone orders (about 7,400 per segment). Terse ambiguity, graded by design: the intended definition is the rubric. The right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 30 THEN 1 ELSE 0 END AS new_run FROM o),
+s AS (SELECT *, sum(new_run) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey
+                                   ROWS UNBOUNDED PRECEDING) AS run FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, run, count(*) AS n FROM s GROUP BY ALL HAVING count(*) >= 2)
+SELECT c_mktsegment AS segment, count(*) AS sprees, count(*) FILTER (WHERE n >= 3) AS sprees_3_plus,
+       avg(n) AS avg_orders_per_spree
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+'''
+
+# The column that answers the question.
+answer_columns = ["sprees"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["segment"]
+# Context that must be right when an answer shows it (to be tested on saved runs before freezing).
+checked_columns = ["sprees_3_plus", "avg_orders_per_spree"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many buying sprees did each market segment have in 1996-97? A spree is orders close together.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+We think customers buy in bursts. Looking only at orders placed in 1996 and 1997, group each customer's orders into runs: a customer's orders belong to the same run as long as each order comes no more than 30 days after that customer's previous order; a gap of more than 30 days starts a new run. A buying spree is a run of at least 2 orders; a lone order isn't a spree. For each market segment, tell me how many sprees there were, how many had at least 3 orders, and the average number of orders per spree, to at least two decimal places.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the growth team:
+
+> Consider only orders with order date on or after 1996-01-01 and before 1998-01-01. For each customer, sort these orders by order date, then order key. The first order starts a run. Each later order starts a new run if its order date is more than 30 days after the order date of the immediately preceding order of that customer; otherwise it belongs to the current run. Orders on the same day are 0 days apart. A spree is a run containing at least 2 orders. For each customer market segment, return the number of sprees, the number of sprees containing at least 3 orders, and the average number of orders per spree.
+
+Requirements:
+
+- The gap is measured from the previous order, not from the first order of the run. Exactly 30 days apart stays in the same run.
+- Orders outside the date range neither start nor extend runs.
+- A run of one order is not a spree: it is not counted anywhere, including in the average.
+- Give the average to at least two decimal places.
+'''

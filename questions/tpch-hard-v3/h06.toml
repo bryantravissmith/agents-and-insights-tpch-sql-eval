@@ -1,0 +1,53 @@
+id = "h06v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31. Ranks with ties (standard competition ranking) within nation, per year, then the change. Traps: DENSE_RANK; assigning the year by commit or receipt date instead of ship date; ranking globally instead of within nation. Terse key: Intended: a line item is on time when it is received on or before its commit date and belongs to the year it shipped; suppliers are ranked within their own country with competition ranking (1, 2, 2, 4); ties in improvement break by supplier key. Most agents assigned the year by receipt date, a reasonable reading that this rubric grades wrong. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. The reference also returns nation, rank_1995, rank_1996, improvement as context, not required; checked when shown: rank_1995, rank_1996, improvement. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+WITH rate AS (
+  SELECT s_suppkey, s_name, s_nationkey, year(l_shipdate) AS yr,
+         count(*) FILTER (WHERE l_receiptdate <= l_commitdate) / count(*) AS on_time
+  FROM supplier JOIN lineitem ON l_suppkey = s_suppkey
+  WHERE l_shipdate >= DATE '1995-01-01' AND l_shipdate < DATE '1997-01-01'
+  GROUP BY ALL),
+rk AS (
+  SELECT *, rank() OVER (PARTITION BY s_nationkey, yr ORDER BY on_time DESC) AS rnk FROM rate),
+both_years AS (
+  SELECT a.s_suppkey, a.s_name, a.s_nationkey, a.rnk AS rank_1995, b.rnk AS rank_1996
+  FROM rk a JOIN rk b ON b.s_suppkey = a.s_suppkey AND a.yr = 1995 AND b.yr = 1996)
+SELECT s_name AS supplier, n_name AS nation, rank_1995, rank_1996, rank_1995 - rank_1996 AS improvement
+FROM both_years JOIN nation ON n_nationkey = s_nationkey
+ORDER BY improvement DESC, s_suppkey
+LIMIT 5
+'''
+
+# The columns that answer the question.
+answer_columns = ["supplier"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+# Context that must be right when an answer shows it.
+checked_columns = ["rank_1995", "rank_1996", "improvement"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Which 5 suppliers improved their on-time ranking in their country the most from 1995 to 1996?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For supplier reviews: rate each supplier's on-time performance per year as the share of its line items that arrived on or before the committed date, assigning items to the year they shipped. Rank suppliers within their own country for 1995 and for 1996, best rate first, with tied suppliers sharing a rank and the next rank skipping ahead (1, 2, 2, 4). Show me the 5 suppliers whose rank improved the most from 1995 to 1996, with their country, both ranks and the improvement. Break ties in improvement by supplier key.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the supply chain team:
+
+> For each supplier and each ship year Y in {1995, 1996}, the on-time rate is the fraction of the supplier's line items with ship date in year Y whose receipt date is on or before the commit date. Within each supplier nation and year, rank suppliers by on-time rate descending using standard competition ranking (ties share the lowest rank; the next rank skips, e.g. 1, 2, 2, 4). For suppliers ranked in both years, improvement = 1995 rank - 1996 rank. Return the 5 suppliers with the largest improvement, ties broken by supplier key ascending.
+
+Requirements:
+
+- Ranks are within the supplier's nation, not across all suppliers.
+- Return the supplier name, nation name, 1995 rank, 1996 rank and improvement.
+'''

@@ -1,0 +1,55 @@
+id = "h04v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Hard, novel, first published 2026-10-31; v3 2026-11-01. Exclusive-method percentile (Excel PERCENTILE.EXC), which no DuckDB built-in computes, over whole orders. Order size is the order's recorded total price (o_totalprice): in v1 it was net line revenue, which 0 of 135 terse runs chose (88% used the order total), so v3 adopts the reading a stakeholder most likely means. Traps: quantile_cont (the inclusive method; 72 to 1,606 off per region); dropping only the returned line items instead of the whole order (about 3,900 orders per region instead of about 650). Choosing 1994 matters: TPC-H only marks items returned before mid-1995, so a later year makes the exclusion vacuous. Terse ambiguity, graded by design: the intended definition is the rubric. The right move is to ask; an answer that states a different assumption is still graded wrong, and its stated assumptions are kept for review. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql = '''
+WITH ord AS (
+  SELECT o_orderkey, o_custkey, o_totalprice AS size
+  FROM orders
+  WHERE o_orderdate >= DATE '1994-01-01' AND o_orderdate < DATE '1995-01-01'
+    AND NOT EXISTS (SELECT 1 FROM lineitem WHERE l_orderkey = o_orderkey AND l_returnflag = 'R')),
+x AS (
+  SELECT r_name, size::DOUBLE AS size,
+         row_number() OVER (PARTITION BY r_name ORDER BY size) AS pos,
+         count(*) OVER (PARTITION BY r_name) AS n
+  FROM ord JOIN customer ON c_custkey = o_custkey
+  JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey),
+h AS (SELECT DISTINCT r_name, n, 0.9 * (n + 1) AS h FROM x)
+SELECT h.r_name AS region, h.n AS orders, lo.size + (h.h - floor(h.h)) * (hi.size - lo.size) AS p90_order_size
+FROM h
+JOIN x lo ON lo.r_name = h.r_name AND lo.pos = floor(h.h)
+JOIN x hi ON hi.r_name = h.r_name AND hi.pos = ceil(h.h)
+ORDER BY region
+'''
+
+# The column that answers the question.
+answer_columns = ["p90_order_size"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = ["region"]
+# Context that must be right when an answer shows it: the number of orders behind each percentile.
+checked_columns = ["orders"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+What's the 90th percentile order size by region for 1994, leaving out orders with returns? Use the exclusive percentile.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+For a pricing review I need the 90th percentile of order size by customer region, for orders placed in 1994. Order size is the order's total price, as recorded on the order. Leave out any order that had at least one returned item, the whole order, not just the returned items. Compute the percentile the way Excel's PERCENTILE.EXC does. Show region, the number of orders included, and the percentile.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the pricing team:
+
+> Consider orders with order date on or after 1994-01-01 and before 1995-01-01 that have no line item with return flag 'R'. An order's size is its total price (the order's recorded total). Group orders by the region of the customer's nation. Within each region, sort the n order sizes ascending as x(1) <= ... <= x(n) and compute the 90th percentile with the exclusive method: h = 0.9 * (n + 1); the result is x(floor(h)) + (h - floor(h)) * (x(floor(h) + 1) - x(floor(h))). Return the region name, n, and the percentile.
+
+Requirements:
+
+- An order with any returned line item is excluded entirely.
+- This is not Excel's PERCENTILE.INC (h = 0.9 * (n - 1) + 1) and not nearest-rank. The exclusive and inclusive methods both interpolate; they differ in h.
+'''

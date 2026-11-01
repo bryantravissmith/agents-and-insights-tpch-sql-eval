@@ -1,0 +1,35 @@
+id = "q11v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Important stock identification. HAVING against a scalar subquery (0.0001 * total); the nation filter must appear in both. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q11.sql"
+
+# The columns that answer the question.
+answer_columns = ["ps_partkey"]
+# Labels say which row is which; columns in neither list are context, not graded.
+label_columns = []
+
+[[levels]]
+name = "terse"
+prompt = '''
+Which parts make up the most important stock held by German suppliers?
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Inventory wants the parts that matter most in German suppliers' stock. A part's stock value is supply cost times available quantity, summed across German suppliers. Keep a part if its value is more than 0.01% of the total stock value of all German suppliers. Biggest value first.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the inventory team:
+
+> Using only suppliers located in GERMANY, compute each part's stock value as the sum of supply cost * available quantity across those suppliers. Also compute the total stock value across all German suppliers and parts. Return the parts whose value is greater than 0.0001 * that total.
+
+Requirements:
+
+- Return the part key and value.
+- Give value to at least two decimal places.
+'''

@@ -1,0 +1,33 @@
+id = "q01v3"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Pricing summary. Aggregates at lineitem grain, no join; baseline sanity check. Inclusive ship-date cutoff. v3 (2026-11-01): all three levels in one file; spec brief without unenforced format rules."
+target_sql_file = "../../tpch/queries/q01.sql"
+
+# The columns that answer the question.
+answer_columns = ["sum_qty", "sum_base_price", "sum_disc_price", "sum_charge", "avg_qty", "avg_price", "avg_disc", "count_order"]
+
+[[levels]]
+name = "terse"
+prompt = '''
+Give me the pricing summary by return flag and line status for everything shipped through September 2, 1998.
+'''
+
+[[levels]]
+name = "stakeholder"
+prompt = '''
+Finance wants the standard pricing summary report. For every line item shipped on or before September 2, 1998, grouped by return flag and line status: total quantity, total list price, total price after discount, total price after discount plus tax, average quantity, average list price, average discount, and the number of line items. Sort by return flag, then line status.
+'''
+
+[[levels]]
+name = "spec"
+prompt = '''
+Question from the finance team:
+
+> For line items shipped on or before 1998-09-02 (inclusive), group by return flag and line status. For each group report, in this order: the sum of quantity; the sum of extended price; the sum of extended price * (1 - discount); the sum of extended price * (1 - discount) * (1 + tax); the average quantity; the average extended price; the average discount; and the number of line items.
+
+Requirements:
+
+- Return the return flag, the line status and the eight measures.
+- Give every measure to at least two decimal places.
+'''

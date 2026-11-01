@@ -6,11 +6,21 @@ Each dataset gets a folder (`tpch/`). Each `<dataset>/qNN.toml` holds one questi
 | --- | --- | --- | --- |
 | 0 | `terse` | One line, the way it gets typed into Slack. No constants, ambiguous terms left ambiguous. | Does the model ask, assume, or guess? Does it find the right date range on its own? |
 | 1 | `stakeholder` | How a thoughtful stakeholder would ask: plain English, the key definitions ("late" = after promised date), constants in natural form ("July through September"). | Can it translate a clear business definition into correct SQL without structural hints? |
-| 2 | `spec` | Fully specified: exact dates, half-open ranges, column count, "count each order at most once." | Ceiling. If it fails here the model can't do the task; if it passes only here, the owner is doing the work. |
+| 2 | `spec` | Fully specified: exact dates, half-open ranges, the values to return, "count each order at most once." | Ceiling. If it fails here the model can't do the task; if it passes only here, the owner is doing the work. |
 
 Add rungs freely (`misleading`, `with-schema-hint`), or skip files and pass free text with `uv run evals.py ask "..." --target-sql ...`.
 
 The one rule: **never say "TPC-H" or "Q21" in a prompt.** The answer key is the target SQL, never the prompt, and preflight refuses prompts that name the benchmark or a query number.
+
+## Version 3: the frozen eval (`tpch-v3/`, `tpch-novel-v3/`, `tpch-hard-v3/`)
+
+The 34 questions grid v3 runs, frozen 2026-11-01: 22 TPC-H, 6 novel, 6 hard, each with all three levels in one file (ids `q01v3` and so on). They're built from the earlier versions, below, with these changes:
+- **One file per question.** The v2 sets held only the terse level, so v3 joins v2's terse key to v1's stakeholder and spec briefs.
+- **The fuller reference.** Novel and hard questions return v1's columns again; the columns the terse brief doesn't ask for are context, not required (n01 and n04 keep v2's reference, whose accepted forms share its columns). `checked_columns` makes a shown context number count where saved runs showed the check catches only real errors: q18, q21, q22, n06, h02, h04, h06.
+- **Two definitions changed**, after 0 of 135 terse runs reached h04's and 7% reached h02's: h04's order size is the order's recorded total price, and an h02 spree is a run of at least 2 orders. Their stakeholder and spec briefs were rewritten to match, so a clarifying question answered with the next brief never contradicts the key, and reviewed by GPT-6 Astra, Claude Fable 5.1 and Grok 4.7.
+- **Spec briefs state what's graded, not formats.** "Return exactly N columns, in this order" became "Return ..."; "do not round" became "to at least two decimal places", the precision the grader enforces; sorts stay only where they decide which rows are in the answer (a first 100, a top 5) or how a value is computed. Requirements that define the answer stay ("count line items, not orders", "a fraction between 0 and 1, not a percentage").
+- **Notes** say asking is the right move on an ambiguous terse brief; an answer that states a different assumption is still graded wrong.
+- **The grain set** isn't in v3: six agents, from the strongest to the weakest, avoided every designed grain trap in 485 of 486 runs, so it separated nobody.
 
 ## Novel questions (`tpch-novel/`)
 
