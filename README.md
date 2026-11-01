@@ -54,6 +54,8 @@ uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --declare-columns  
 
 **Declared answer columns** (`run --declare-columns`): `submit_sql` also takes the names of the result columns that answer the request. The grader pairs rows by the question's label columns, normalizing their form, and scores only the declared columns against the answer columns. See `questions/README.md`, "Answer, label and context columns", and `evalkit/declared.py`.
 
+**Declared grain** (`run --declare-grain`, which implies `--declare-columns`): `submit_sql` also takes `grain_columns`, the columns that identify one row of the result (empty for a single-row answer). The grain must be unique in the agent's own result (else `grain_not_unique`), and only those columns may pair rows with the reference's labels; a different number of rows is `grain_differs`. Both are wrong answers that name the error, so grain mistakes, the classic analysis bug, can be counted apart from wrong values.
+
 `experiments/full-grid-2026-10-31.sh` runs `reparse`, `rescore`, `report`, `audit`, `style`, the novel and hard v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
 
 From Python (a notebook, a script):
@@ -129,6 +131,9 @@ These verdicts measure result equivalence, not every instruction in a prompt. A 
 | `columns_reordered` | same rows once columns are permuted | yes |
 | `extra_columns` | all target columns present, plus others | yes (noted; before 2026-11-01, no) |
 | `missing_columns` | every column it returned lines up, but some target columns are absent | no |
+| `bad_declaration` | a declared answer or grain column is not in the result (declaring batches only) | no |
+| `grain_not_unique` | the declared grain repeats in the agent's own result, as when a join fans out | no |
+| `grain_differs` | the declared grain gives a different number of rows than the reference's | no |
 | `rows_differ` / `values_differ` / `columns_differ` | wrong answer | no |
 | `sql_error` | candidate fails or is refused | no |
 | `no_sql` / `timeout` / `harness_error` | nothing to grade | no |

@@ -37,11 +37,13 @@ class RunContext:
     timeout_s: int
     extra_args: tuple[str, ...] = ()
     declare: bool = False  # submit_sql also takes answer_columns (see evalkit/declared.py)
+    declare_grain: bool = False  # ... and grain_columns
 
     @property
     def tool_env(self) -> dict[str, str]:
         env = {"AUDIT_DB": str(self.db), "AUDIT_OUT": str(self.run_dir)}
-        return env | ({"AUDIT_DECLARE": "1"} if self.declare else {})
+        env |= {"AUDIT_DECLARE": "1"} if self.declare or self.declare_grain else {}
+        return env | ({"AUDIT_DECLARE_GRAIN": "1"} if self.declare_grain else {})
 
     def mcp_server(self) -> dict:
         return {"command": "uv", "args": ["run", "--quiet", str(MCP_SERVER)], "env": self.tool_env}

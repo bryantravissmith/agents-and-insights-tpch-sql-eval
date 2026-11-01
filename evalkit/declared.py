@@ -18,8 +18,14 @@ interchangeable columns, such as a customer's key or name: either one answers it
    missing_columns or values_differ when an answer is absent or wrong. bad_declaration means a declared name is
    not in the result.
 
+A batch can also ask for the grain (`run --declare-grain`): the columns that identify one row of the result, empty
+for a one-row answer. A declared grain must be unique in the run's own result (else grain_not_unique, as when a
+fan-out join repeats a row), and only its columns may pair rows with the reference's labels; a different number
+of rows than the reference is grain_differs. Both verdicts are wrong answers that name the grain error.
+
 When the labels cannot be paired (other rows, a label in a form not normalized, or a reference whose labels do
-not identify its rows), `grade_declared` returns None and the caller grades the run as if nothing was declared.
+not identify its rows), `grade_declared` returns None and the caller grades the run as if nothing was declared;
+with a declared grain, only when the row counts agree.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 
@@ -78,14 +85,18 @@ def _project(res: Result, idx: list[int]) -> Result:
     return Result(tuple(res.columns[i] for i in idx), tuple(tuple(r[i] for i in idx) for r in res.rows))
 
 
-def _pair_labels(got: Result, exp: Result, labels: list[int]) -> tuple[list[int], dict] | None:
-    """Candidate column for each reference label column, and reference row -> candidate row; None if none fit."""
+def _pair_labels(
+    got: Result, exp: Result, labels: list[int], allowed: list[int] | None = None
+) -> tuple[list[int], dict] | None:
+    """Candidate column for each reference label column, and reference row -> candidate row; None if none fit.
+    `allowed` limits the candidate columns that may serve as labels (a declared grain)."""
     exp_cols = {j: normalize_column(r[j] for r in exp.rows) for j in labels}
     got_cols = [normalize_column(r[i] for r in got.rows) for i in range(len(got.columns))]
     exp_keys = [tuple(exp_cols[j][k] for j in labels) for k in range(len(exp.rows))]
     if len(set(exp_keys)) < len(exp_keys):
         return None  # the reference's labels do not identify its rows
-    cands = [[i for i, col in enumerate(got_cols) if Counter(col) == Counter(exp_cols[j])] for j in labels]
+    pool = range(len(got.columns)) if allowed is None else allowed
+    cands = [[i for i in pool if Counter(got_cols[i]) == Counter(exp_cols[j])] for j in labels]
 
     def search(k, used, acc):
         if k == len(labels):
@@ -141,26 +152,51 @@ def answer_slots(exp_columns: tuple[str, ...], answer_columns: tuple[tuple[str, 
 DECLARATION = "answer_columns.json"
 
 
-def read_declaration(run_dir: Path) -> list[str] | None:
-    """The answer columns a run declared in submit_sql, or None when it declared none."""
+@dataclass(frozen=True)
+class Declaration:
+    """What a run declared in submit_sql: its answer columns and, when the batch asked, its grain (the columns
+    that identify one row; empty for a one-row answer). None for answer means every result column."""
+
+    answer: tuple[str, ...] | None
+    grain: tuple[str, ...] | None = None
+
+
+def read_declaration(run_dir: Path) -> Declaration | None:
+    """The declaration a run saved with submit_sql, or None when it declared nothing.
+
+    answer_columns.json holds a list of answer columns, or {"answer": [...], "grain": [...]} when the batch also
+    asked for the grain."""
     p = Path(run_dir) / DECLARATION
     if not p.exists():
         return None
-    cols = json.loads(p.read_text())
-    return [str(c) for c in cols] if isinstance(cols, list) else None
+    data = json.loads(p.read_text())
+    if isinstance(data, list):
+        return Declaration(tuple(str(c) for c in data))
+    if isinstance(data, dict) and isinstance(data.get("answer"), list):
+        grain = data.get("grain")
+        return Declaration(
+            tuple(str(c) for c in data["answer"]), tuple(str(c) for c in grain) if isinstance(grain, list) else None
+        )
+    return None
 
 
-ALL = "*"  # as a declaration: every result column (checking runs that declared nothing)
+ALL = Declaration(None)  # every result column as the answer: how saved runs that declared nothing are checked
 
 
-def grade_task(candidate_sql: str | None, declared: list[str] | str | None, task, db: Path) -> tuple[Grade, int, dict]:
-    """The grade for one run: by its declared answer columns when it declared them and its rows pair up,
-    otherwise against the target and its accepted alternatives (`grading.grade_any`). Returns the grade, which
-    reference graded it (0 is the target) and the declaration notes ({} when nothing was declared).
-    `declared` is the list of names, ALL for every result column, or None for no declaration."""
+def grade_task(candidate_sql: str | None, declared: Declaration | None, task, db: Path) -> tuple[Grade, int, dict]:
+    """The grade for one run: by its declaration when it made one and its rows pair up, otherwise against the
+    target and its accepted alternatives (`grading.grade_any`). Returns the grade, which reference graded it
+    (0 is the target) and the declaration notes ({} when nothing was declared)."""
     if declared is not None:
-        names = None if declared == ALL else declared
-        hit = grade_declared(candidate_sql, names, task.target_sql, task.answer_columns, db, task.label_columns)
+        hit = grade_declared(
+            candidate_sql,
+            None if declared.answer is None else list(declared.answer),
+            task.target_sql,
+            task.answer_columns,
+            db,
+            task.label_columns,
+            grain=None if declared.grain is None else list(declared.grain),
+        )
         if hit is not None:
             return hit[0], 0, hit[1] | {"graded_by": "declared columns"}
     g, ref = grade_any(candidate_sql, task.target_sql, task.accepted_sql, db)
@@ -174,10 +210,14 @@ def grade_declared(
     answer_columns: tuple[tuple[str, ...], ...],
     db: Path,
     label_columns: tuple[str, ...] | None = None,
+    grain: list[str] | None = None,
 ) -> tuple[Grade, dict] | None:
     """Grade the declared columns against the reference's answer columns; None means fall back to grade_any.
 
     `declared` None means every result column, which is how saved runs that declared nothing can be checked.
+    `grain` is the run's declared grain, the columns that identify one of its rows. When given, it must be unique
+    in the run's own result (else grain_not_unique), and rows pair only through it: a different number of rows
+    than the reference is grain_differs. Without it, any result column may pair rows.
     """
     exp = expected_result(target_sql, Path(db))
     if not candidate_sql or not candidate_sql.strip():
@@ -202,6 +242,21 @@ def grade_declared(
         wanted = {c.lower() for c in label_columns}
         labels = [j for j, c in enumerate(exp.columns) if c.lower() in wanted]
     notes = {"declared": [got.columns[i] for i in dec], "answers": [_slot_name(exp, s) for s in slots]}
+    grain_idx = None
+    if grain is not None:
+        if unknown := [c for c in grain if c.strip().lower() not in names]:
+            detail = f"grain {unknown}; the result has {list(got.columns)}"
+            return Grade("bad_declaration", rows_got=len(got.rows), rows_expected=len(exp.rows), detail=detail), notes
+        grain_idx = list(dict.fromkeys(names[c.strip().lower()] for c in grain))
+        notes["grain"] = [got.columns[i] for i in grain_idx]
+        cols = [normalize_column(r[i] for r in got.rows) for i in grain_idx]
+        keys = Counter(tuple(col[r] for col in cols) for r in range(len(got.rows)))
+        if (repeated := [k for k, n in keys.items() if n > 1]) or (not grain_idx and len(got.rows) > 1):
+            detail = f"{len(got.rows)} rows, {len(keys)} distinct values of the grain {notes['grain']}" + (
+                f"; e.g. {repeated[0]} appears {keys[repeated[0]]} times" if repeated else ""
+            )
+            g = Grade("grain_not_unique", rows_got=len(got.rows), rows_expected=len(exp.rows), detail=detail)
+            return g, notes
 
     if not labels:  # nothing identifies the rows: the declared values must match as a set of rows
         best = None
@@ -213,8 +268,12 @@ def grade_declared(
         _, g, chosen = best
         g.column_map = [dec[i] for i in g.column_map] if g.column_map else None
         return g, notes | {"matched": [exp.columns[j] for j in chosen]}
-    paired = _pair_labels(got, exp, labels)
+    paired = _pair_labels(got, exp, labels, allowed=grain_idx)
     if paired is None:
+        if grain_idx is not None and len(got.rows) != len(exp.rows):
+            ref = [exp.columns[j] for j in labels]
+            detail = f"{len(got.rows)} rows at the grain {notes['grain']}; the reference has {len(exp.rows)} at {ref}"
+            return Grade("grain_differs", rows_got=len(got.rows), rows_expected=len(exp.rows), detail=detail), notes
         return None
     label_cols, rows = paired
     notes["labels"] = {exp.columns[j]: got.columns[i] for j, i in zip(labels, label_cols)}

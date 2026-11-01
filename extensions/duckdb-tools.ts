@@ -12,6 +12,7 @@
  *   AUDIT_DB       path to the .duckdb file            (default <sql-evals>/tpch.duckdb)
  *   AUDIT_OUT      directory for queries.log / answer.* (default <sql-evals>/results/adhoc)
  *   AUDIT_DECLARE  1: submit_sql also takes answer_columns, saved to answer_columns.json
+ *   AUDIT_DECLARE_GRAIN  1 (with AUDIT_DECLARE): also grain_columns, saved as {"answer": [...], "grain": [...]}
  *
  * Requires the `duckdb` CLI on PATH (brew install duckdb).
  */
@@ -29,6 +30,8 @@ const DB = resolve(process.env.AUDIT_DB ?? resolve(HARNESS, "tpch.duckdb"));
 const OUT = resolve(process.env.AUDIT_OUT ?? resolve(HARNESS, "results", "adhoc"));
 // Batches run with declared answer columns: submit_sql also takes the names of the columns that answer.
 const DECLARE = process.env.AUDIT_DECLARE === "1";
+// ... and also the grain: the names of the columns that identify one row of the result.
+const GRAIN = process.env.AUDIT_DECLARE_GRAIN === "1";
 
 /** The column names in the header line of the duckdb CLI's CSV output (quoted names unquoted). */
 function csvHeader(out: string): string[] {
@@ -227,17 +230,30 @@ export default function (pi: any) {
     description:
       "Submit your final answer. Saves the query and executes it to confirm it runs. " +
       "Call this exactly once, when you are confident the query is correct. After calling it, summarize your assumptions and stop.",
-    parameters: DECLARE
-      ? Type.Object({
-          sql: Type.String({ description: "The final SELECT statement that answers the question." }),
-          answer_columns: Type.Array(Type.String(), {
-            description: "The names of the result columns that answer the request; other columns are context.",
-          }),
-        })
-      : Type.Object({
-          sql: Type.String({ description: "The final SELECT statement that answers the question." }),
-        }),
-    async execute(_id: string, params: { sql: string; answer_columns?: string[] }) {
+    parameters:
+      DECLARE && GRAIN
+        ? Type.Object({
+            sql: Type.String({ description: "The final SELECT statement that answers the question." }),
+            answer_columns: Type.Array(Type.String(), {
+              description: "The names of the result columns that answer the request; other columns are context.",
+            }),
+            grain_columns: Type.Array(Type.String(), {
+              description:
+                "The names of the result columns that identify one row of your result (one row per what?); " +
+                "an empty list if the result is a single row.",
+            }),
+          })
+        : DECLARE
+          ? Type.Object({
+              sql: Type.String({ description: "The final SELECT statement that answers the question." }),
+              answer_columns: Type.Array(Type.String(), {
+                description: "The names of the result columns that answer the request; other columns are context.",
+              }),
+            })
+          : Type.Object({
+              sql: Type.String({ description: "The final SELECT statement that answers the question." }),
+            }),
+    async execute(_id: string, params: { sql: string; answer_columns?: string[]; grain_columns?: string[] }) {
       const bad = refuse(params.sql);
       if (bad) {
         log("REFUSED-SUBMIT", params.sql, bad);
@@ -263,8 +279,17 @@ export default function (pi: any) {
           log("SUBMIT-ERROR", params.sql, note);
           throw new Error(`Submission not recorded: ${note}. Name columns of your query's result.`);
         }
-        writeFileSync(resolve(OUT, "answer_columns.json"), JSON.stringify(declared));
-        log("SUBMIT", params.sql, `rows=${rows} answer_columns=${JSON.stringify(declared)}`);
+        const grain = GRAIN ? (params.grain_columns ?? []).map((c) => c.trim()) : null;
+        const badGrain = (grain ?? []).filter((c) => !names.has(c.toLowerCase()));
+        if (badGrain.length > 0) {
+          const note = `grain_columns ${JSON.stringify(badGrain)} not in the result columns ${JSON.stringify(cols)}`;
+          log("SUBMIT-ERROR", params.sql, note);
+          throw new Error(`Submission not recorded: ${note}. Name columns of your query's result.`);
+        }
+        const saved = grain === null ? declared : { answer: declared, grain };
+        writeFileSync(resolve(OUT, "answer_columns.json"), JSON.stringify(saved));
+        const grainNote = grain === null ? "" : ` grain_columns=${JSON.stringify(grain)}`;
+        log("SUBMIT", params.sql, `rows=${rows} answer_columns=${JSON.stringify(declared)}${grainNote}`);
       } else {
         log("SUBMIT", params.sql, `rows=${rows}`);
       }

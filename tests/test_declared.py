@@ -11,7 +11,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from test_evalkit import Q04_BODY, FakeHarness, _with_fake, sandbox  # noqa: F401 (sandbox is a fixture)
 
 from evalkit import load_question, load_questions, runner
-from evalkit.declared import ALL, grade_declared, grade_task, normalize_column
+from evalkit.declared import (
+    ALL,
+    Declaration,
+    grade_declared,
+    grade_task,
+    normalize_column,
+    read_declaration,
+)
 from evalkit.tasks import Task
 
 HERE = Path(__file__).resolve().parent.parent
@@ -76,7 +83,7 @@ def test_bad_declarations_and_fallbacks(synthetic_db):
     assert grade_declared(fewer, ["a"], SEGMENTS, (("avg_orders",),), synthetic_db) is None
     task = Task.adhoc("?", target_sql=SEGMENTS, db=synthetic_db)
     task = Task(**{**task.__dict__, "answer_columns": (("avg_orders",),)})
-    g, _, notes = grade_task(fewer, ["a"], task, synthetic_db)
+    g, _, notes = grade_task(fewer, Declaration(("a",)), task, synthetic_db)
     assert g.verdict == "rows_differ" and notes["graded_by"].startswith("whole result")
     g, _, notes = grade_task(SEGMENTS, ALL, task, synthetic_db)  # every column declared
     assert g.verdict == "extra_columns" and notes["graded_by"] == "declared columns"
@@ -170,3 +177,65 @@ def test_a_declaring_batch_asks_for_columns_and_grades_by_them(monkeypatch, db, 
     manifest = json.loads((runner.RESULTS / "decl" / "manifest.json").read_text())
     assert manifest["run_options"]["declare_columns"] is True
     assert manifest["tasks"][0]["prompt_sha"] == runner.declaring(tasks)[0].prompt_sha
+
+
+def test_a_declared_grain_must_be_unique_and_must_match_the_reference(synthetic_db):
+    answers = (("avg_orders",),)
+    # A fan-out repeats a segment: the agent's own grain claim is false.
+    dup = "SELECT * FROM (VALUES ('AUTOMOBILE', 1.5), ('AUTOMOBILE', 1.5), ('BUILDING', 2.25)) t(s, a)"
+    g, notes = grade_declared(dup, ["a"], SEGMENTS, answers, synthetic_db, grain=["s"])
+    assert g.verdict == "grain_not_unique" and not g.correct and "automobile" in g.detail
+    # One row per segment for two of three segments: the grain differs from the reference's.
+    fewer = "SELECT * FROM (VALUES ('AUTOMOBILE', 1.5), ('BUILDING', 2.25)) t(s, a)"
+    g, _ = grade_declared(fewer, ["a"], SEGMENTS, answers, synthetic_db, grain=["s"])
+    assert g.verdict == "grain_differs" and "2 rows" in g.detail and "segment" in g.detail
+    # The right grain, written in lower case: pairs and passes; the grain is recorded.
+    right = "SELECT * FROM (VALUES ('machinery', 3.0), ('automobile', 1.5), ('building', 2.25)) t(s, a)"
+    g, notes = grade_declared(right, ["a"], SEGMENTS, answers, synthetic_db, grain=["s"])
+    assert g.verdict == "exact" and notes["grain"] == ["s"]
+    # Only declared grain columns may pair rows: a grain that is not the segment cannot stand in for it.
+    other = "SELECT * FROM (VALUES ('AUTOMOBILE', 1.5, 1), ('BUILDING', 2.25, 2), ('MACHINERY', 3.0, 3)) t(s, a, n)"
+    assert grade_declared(other, ["a"], SEGMENTS, answers, synthetic_db, grain=["n"]) is None  # same rows: fall back
+    # An empty grain claims one row.
+    g, _ = grade_declared(right, ["a"], SEGMENTS, answers, synthetic_db, grain=[])
+    assert g.verdict == "grain_not_unique"
+    g, _ = grade_declared("SELECT 2 AS x", ["x"], "SELECT 2 AS total", (("total",),), synthetic_db, grain=[])
+    assert g.verdict == "exact"
+    assert grade_declared(right, ["a"], SEGMENTS, answers, synthetic_db, grain=["zz"])[0].verdict == "bad_declaration"
+
+
+def test_declarations_read_both_saved_forms(tmp_path):
+    (tmp_path / "answer_columns.json").write_text('["a", "b"]')
+    assert read_declaration(tmp_path) == Declaration(("a", "b"))
+    (tmp_path / "answer_columns.json").write_text('{"answer": ["a"], "grain": []}')
+    assert read_declaration(tmp_path) == Declaration(("a",), ())
+    (tmp_path / "answer_columns.json").unlink()
+    assert read_declaration(tmp_path) is None
+
+
+def test_submit_tool_takes_the_grain_when_the_batch_asks(tmp_path, synthetic_db, monkeypatch):
+    import importlib
+
+    import mcp_server
+
+    monkeypatch.setenv("AUDIT_DECLARE", "1")
+    monkeypatch.setenv("AUDIT_DECLARE_GRAIN", "1")
+    mod = importlib.reload(mcp_server)
+    monkeypatch.setattr(mod, "DB", str(synthetic_db))
+    monkeypatch.setattr(mod, "OUT", str(tmp_path))
+    with pytest.raises(ValueError, match="grain_columns"):
+        mod.submit_sql("SELECT 1 AS a, 2 AS b", ["b"], ["zz"])
+    mod.submit_sql("SELECT 1 AS a, 2 AS b", ["b"], ["a"])
+    assert json.loads((tmp_path / "answer_columns.json").read_text()) == {"answer": ["b"], "grain": ["a"]}
+    monkeypatch.delenv("AUDIT_DECLARE")
+    monkeypatch.delenv("AUDIT_DECLARE_GRAIN")
+    importlib.reload(mcp_server)
+
+
+def test_a_grain_batch_asks_for_the_grain_and_sets_the_tool_env():
+    from evalkit.harnesses import RunContext
+
+    (t,) = runner.declaring([Task.adhoc("How many orders?", target_sql="SELECT 1")], grain=True)
+    assert runner.DECLARE_GRAIN_INSTRUCTION in t.prompt and "grain_columns" in t.prompt
+    ctx = RunContext("p", "m", Path("."), Path("."), Path("x.duckdb"), None, 1, 1, declare_grain=True)
+    assert ctx.tool_env["AUDIT_DECLARE"] == "1" and ctx.tool_env["AUDIT_DECLARE_GRAIN"] == "1"

@@ -71,6 +71,11 @@ def _grid_args(p: argparse.ArgumentParser):
         action="store_true",
         help="submit_sql also takes the answer's column names, and runs are graded by them (a different prompt)",
     )
+    p.add_argument(
+        "--declare-grain",
+        action="store_true",
+        help="as --declare-columns, plus the grain: the columns that identify one row (a different prompt again)",
+    )
     _db_arg(p)
 
 
@@ -114,6 +119,7 @@ def _grid(tasks, args):
         keep_work=args.keep_work,
         dry_run=args.dry_run,
         declare_columns=args.declare_columns,
+        declare_grain=args.declare_grain,
     )
     return 0 if results or args.dry_run else 1
 
@@ -160,7 +166,9 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("audit", help="cheating attempts and signs of prior exposure, with evidence, across batches")
     p.add_argument("batches", nargs="+", help="batch ids (folder names under results/)")
-    p.add_argument("--out", type=Path, required=True, help="folder for summary.md, flagged.md, runs.jsonl, markers.json")
+    p.add_argument(
+        "--out", type=Path, required=True, help="folder for summary.md, flagged.md, runs.jsonl, markers.json"
+    )
     _db_arg(p)
 
     p = sub.add_parser("findings", help="the claims the batches support, with intervals over questions")

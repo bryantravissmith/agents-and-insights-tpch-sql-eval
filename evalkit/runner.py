@@ -43,9 +43,18 @@ DECLARE_INSTRUCTION = (
 )
 
 
-def declaring(tasks: list[Task]) -> list[Task]:
-    """The tasks with the declare-columns instruction added to each prompt (so it is part of prompt_sha)."""
-    return [replace(t, prompt=f"{t.prompt}\n\n{DECLARE_INSTRUCTION}") for t in tasks]
+# ... with declare_grain instead (it implies declare_columns).
+DECLARE_GRAIN_INSTRUCTION = (
+    "When you call `submit_sql`, also pass `answer_columns`: the names of the columns in your result that answer"
+    " the request (other columns are treated as context), and `grain_columns`: the names of the columns that"
+    " identify one row of your result, or an empty list if your result is a single row."
+)
+
+
+def declaring(tasks: list[Task], grain: bool = False) -> list[Task]:
+    """The tasks with the declare instruction added to each prompt (so it is part of prompt_sha)."""
+    text = DECLARE_GRAIN_INSTRUCTION if grain else DECLARE_INSTRUCTION
+    return [replace(t, prompt=f"{t.prompt}\n\n{text}") for t in tasks]
 
 
 RESULTS = HARNESS_DIR / "results"
@@ -315,12 +324,14 @@ def run_one(
     keep_work: bool = False,
     record: bool = True,
     declare_columns: bool = False,
+    declare_grain: bool = False,
 ) -> RunResult:
     """One headless agent session on one task, graded against task.target_sql.
 
     The database is the task's own (a question file's `db`), else `db`, else tpch.duckdb. With
     `declare_columns`, submit_sql also takes the answer's column names and the run is graded by them
-    (`declared.grade_task`); the task's prompt must already ask for them (see `declaring`).
+    (`declared.grade_task`); `declare_grain` adds the grain. The task's prompt must already ask for them
+    (see `declaring`).
     """
     agent = Agent.parse(agent)
     db = resolve_db(task, db)
@@ -356,6 +367,7 @@ def run_one(
         timeout_s=timeout_s,
         extra_args=agent.extra_args,
         declare=declare_columns,
+        declare_grain=declare_grain,
     )
     res = RunResult(
         batch=batch,
@@ -415,7 +427,8 @@ def run_one(
         res.sql_source = "none"
 
     # A run that declared its answer columns is graded by them; otherwise by its whole result.
-    declared = read_declaration(run_dir) if declare_columns and res.sql_source == "submit" else None
+    declaring_run = declare_columns or declare_grain
+    declared = read_declaration(run_dir) if declaring_run and res.sql_source == "submit" else None
     g, res.reference, declaration = grade_task(res.sql, declared, task, ctx.db)
     res.verdict, res.detail = g.verdict, g.detail
     res.correct = g.correct and res.sql_source == "submit"
@@ -669,8 +682,9 @@ def resume(
     batch_dir = RESULTS / batch
     manifest = json.loads((batch_dir / "manifest.json").read_text())
     loaded = load_questions(*(questions or [HARNESS_DIR / "questions"]))
-    if manifest["run_options"].get("declare_columns"):
-        loaded = declaring(loaded)
+    opts = manifest["run_options"]
+    if opts.get("declare_columns") or opts.get("declare_grain"):
+        loaded = declaring(loaded, grain=bool(opts.get("declare_grain")))
     by_key = {(t.id, t.level): t for t in loaded}
     tasks = []
     for spec in manifest["tasks"]:
@@ -688,7 +702,7 @@ def resume(
     run_kw = {
         k: v
         for k, v in manifest["run_options"].items()
-        if k in ("timeout_s", "max_turns", "keep_work", "record", "declare_columns")
+        if k in ("timeout_s", "max_turns", "keep_work", "record", "declare_columns", "declare_grain")
     }
     plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in planned]
 
@@ -863,8 +877,8 @@ def run_grid(
     """
     agents = [Agent.parse(a) for a in agents]
     conditions = list(conditions)
-    if run_kw.get("declare_columns"):
-        tasks = declaring(tasks)
+    if run_kw.get("declare_columns") or run_kw.get("declare_grain"):
+        tasks = declaring(tasks, grain=bool(run_kw.get("declare_grain")))
     preflight(tasks, agents, conditions, db, allow_leaky)
     batch = batch or new_batch_id()
     plan = [(t, a, c, r) for r in range(1, repeats + 1) for t in tasks for c in conditions for a in agents]

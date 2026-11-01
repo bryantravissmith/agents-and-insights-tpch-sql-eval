@@ -85,6 +85,8 @@ With `uv run evals.py run ... --declare-columns`:
 - **Fallback:** when the labels can't pair (other rows, or a label form not normalized, such as a month number or name), the run is graded by its whole result, as without a declaration, with `accepted_sql` still applying.
 - **Record:** `result.json`'s `declaration` says which way the run was graded and how the columns lined up.
 
+With `--declare-grain` the agent also names its grain: the columns that identify one of its rows. The reference's labels are its grain. A declared grain must be unique in the agent's result and is the only thing that can pair rows; a grain error gets its own verdict, `grain_not_unique` or `grain_differs`, instead of a generic row mismatch.
+
 `uv run evals.py regrade <batches> --questions questions/tpch questions/tpch-novel questions/tpch-hard --name declared-all --declare-all` checks this on saved runs, which declared nothing, by treating every result column as declared. On the 2026-10-31 grid:
 - 13,487 of 13,864 runs paired by label;
 - no run that is correct today became wrong;

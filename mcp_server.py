@@ -7,7 +7,8 @@
 Same two tools, same blocklist (sqlguard.py), same logging as extensions/duckdb-tools.ts (which pi uses):
   run_sql(sql)     read-only, <=50 rows as CSV, every statement appended to $AUDIT_OUT/queries.log
   submit_sql(sql)  saves $AUDIT_OUT/answer.sql and runs it (evalkit re-executes answer.sql to grade)
-                   with AUDIT_DECLARE=1 it also takes answer_columns, saved to answer_columns.json
+                   with AUDIT_DECLARE=1 it also takes answer_columns, saved to answer_columns.json, and with
+                   AUDIT_DECLARE_GRAIN=1 too, grain_columns (saved as {"answer": [...], "grain": [...]})
 
 Env: AUDIT_DB (path to tpch.duckdb), AUDIT_OUT (run directory), AUDIT_DECLARE (1: declared answer columns).
 Run: uv run mcp_server.py        (stdio transport; the CLIs launch it themselves)
@@ -30,6 +31,8 @@ OUT = os.path.abspath(os.environ.get("AUDIT_OUT", os.path.join(HERE, "results", 
 MAX_ROWS = 50
 # Batches run with declared answer columns: submit_sql also takes the names of the columns that answer.
 DECLARE = os.environ.get("AUDIT_DECLARE") == "1"
+# ... and also the grain: the names of the columns that identify one row of the result.
+GRAIN = os.environ.get("AUDIT_DECLARE_GRAIN") == "1"
 
 mcp = FastMCP("audit")
 
@@ -86,7 +89,7 @@ def run_sql(sql: str) -> str:
     return shown + tail
 
 
-def _submit(sql: str, answer_columns: list[str] | None) -> str:
+def _submit(sql: str, answer_columns: list[str] | None, grain_columns: list[str] | None = None) -> str:
     bad = refuse(sql)
     if bad:
         _log("REFUSED-SUBMIT", sql, bad)
@@ -106,13 +109,32 @@ def _submit(sql: str, answer_columns: list[str] | None) -> str:
             note = f"answer_columns {unknown or 'empty'} not in the result columns {cols}"
             _log("SUBMIT-ERROR", sql, note)
             raise ValueError(f"Submission not recorded: {note}. Name columns of your query's result.")
+        if grain_columns is not None and (unknown := [c for c in grain_columns if c.strip().lower() not in names]):
+            note = f"grain_columns {unknown} not in the result columns {cols}"
+            _log("SUBMIT-ERROR", sql, note)
+            raise ValueError(f"Submission not recorded: {note}. Name columns of your query's result.")
+        answer = [c.strip() for c in answer_columns]
+        saved = answer if grain_columns is None else {"answer": answer, "grain": [c.strip() for c in grain_columns]}
         with open(os.path.join(OUT, "answer_columns.json"), "w") as f:
-            json.dump([c.strip() for c in answer_columns], f)
-    _log("SUBMIT", sql, f"rows={len(rows)}" + (f" answer_columns={answer_columns}" if answer_columns else ""))
+            json.dump(saved, f)
+    note = f" answer_columns={answer_columns}" if answer_columns else ""
+    note += f" grain_columns={grain_columns}" if grain_columns is not None else ""
+    _log("SUBMIT", sql, f"rows={len(rows)}{note}")
     return f"Submitted. {len(rows)} rows recorded. Now state your assumptions and stop."
 
 
-if DECLARE:
+if DECLARE and GRAIN:
+
+    @mcp.tool()
+    def submit_sql(sql: str, answer_columns: list[str], grain_columns: list[str]) -> str:
+        """Submit your FINAL answer. Saves the query and executes it to confirm it runs.
+        answer_columns: the names of the result columns that answer the request; other columns are context.
+        grain_columns: the names of the result columns that identify one row of your result (one row per what?);
+        an empty list if the result is a single row.
+        Call exactly once, when you are confident the query is correct. Then state your assumptions and stop."""
+        return _submit(sql, answer_columns, grain_columns)
+
+elif DECLARE:
 
     @mcp.tool()
     def submit_sql(sql: str, answer_columns: list[str]) -> str:
