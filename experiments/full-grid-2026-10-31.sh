@@ -26,4 +26,8 @@ uv run evals.py report "${BATCHES[@]}" --csv "$OUT/report.csv" > "$OUT/report.md
 # Cheating attempts and signs of prior exposure, with the evidence for every flagged run.
 uv run evals.py audit "${BATCHES[@]}" --out "$OUT/audit"
 
-echo "wrote $OUT/report.md, $OUT/report.csv and $OUT/audit/{summary.md,flagged.md,runs.jsonl,markers.json}"
+# The claims, with intervals over questions; reads the audit's runs.jsonl, so it runs after the audit.
+uv run evals.py findings "${BATCHES[@]}" --out "$OUT/findings" --audit "$OUT/audit"
+
+echo "wrote $OUT/report.md, $OUT/report.csv, $OUT/audit/{summary.md,flagged.md,runs.jsonl,markers.json}"
+echo "  and $OUT/findings/{findings.md,findings.json,terse-misses.md}"

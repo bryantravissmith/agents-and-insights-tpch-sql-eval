@@ -15,6 +15,7 @@
   uv run evals.py resume <batch id> -a agy:gemini-3.8-flash                         # only one agent's runs
   uv run evals.py report <batch id> [<batch id> ...] --csv report.csv                   # accuracy + efficiency
   uv run evals.py audit <batch id> [<batch id> ...] --out audit/                        # cheating + prior exposure
+  uv run evals.py findings <batch id> [<batch id> ...] --out findings/ --audit audit/   # claims, with intervals
   uv run evals.py harnesses                                                           # what is installed
 
 Agents are harness:model. Models are named the way that CLI names them (pi: provider/model).
@@ -32,6 +33,7 @@ from evalkit import (
     Agent,
     Task,
     audit,
+    findings,
     grade_sql,
     load_questions,
     load_scorecard,
@@ -151,6 +153,11 @@ def main(argv=None) -> int:
     p.add_argument("--out", type=Path, required=True, help="folder for summary.md, flagged.md, runs.jsonl, markers.json")
     _db_arg(p)
 
+    p = sub.add_parser("findings", help="the claims the batches support, with intervals over questions")
+    p.add_argument("batches", nargs="+", help="batch ids (folder names under results/)")
+    p.add_argument("--out", type=Path, required=True, help="folder for findings.md, findings.json, terse-misses.md")
+    p.add_argument("--audit", type=Path, required=True, help="the audit folder (its runs.jsonl) for these batches")
+
     p = sub.add_parser("reparse", help="recompute turns, tokens and cost from saved transcripts (after a parser fix)")
     p.add_argument("batch", help="batch id (the folder name under results/)")
 
@@ -164,6 +171,10 @@ def main(argv=None) -> int:
     if args.cmd == "audit":
         done = audit.run_audit(args.batches, args.out, db=args.db)
         print(f"audited {done['runs']} runs; see {done['out_dir']}/summary.md and flagged.md")
+        return 0
+    if args.cmd == "findings":
+        findings.run_findings(args.batches, args.out, audit_runs=args.audit / "runs.jsonl")
+        print(f"wrote {args.out}/findings.md, findings.json and terse-misses.md")
         return 0
     if args.cmd == "reparse":
         reparse(args.batch)
