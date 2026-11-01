@@ -70,6 +70,12 @@ GROUP BY strftime(day, '%a'), isodow(day)
 ORDER BY isodow(day)
   ''',
 ]
+# The tempting query at the wrong grain (see the note): never correct; analysis checks whether a run's
+# answer equals it.
+tempting_sql = '''
+SELECT dayname(o_orderdate), count(*) / 52.0 FROM orders WHERE year(o_orderdate) = 1997
+GROUP BY 1, isodow(o_orderdate) ORDER BY isodow(o_orderdate)
+'''
 
 # The columns that answer the question; the target's other columns are labels.
 answer_columns = ["avg_orders_per_day"]

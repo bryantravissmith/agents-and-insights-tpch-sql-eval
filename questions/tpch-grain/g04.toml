@@ -29,6 +29,13 @@ GROUP BY r_name
 ORDER BY region
   ''',
 ]
+# The tempting query at the wrong grain (see the note): never correct; analysis checks whether a run's
+# answer equals it.
+tempting_sql = '''
+SELECT r_name, count(*) FILTER (WHERE l_returnflag = 'R') / count(*) FROM lineitem JOIN orders ON o_orderkey = l_orderkey
+JOIN customer ON c_custkey = o_custkey JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey
+WHERE year(o_orderdate) = 1994 GROUP BY 1 ORDER BY 1
+'''
 
 # The columns that answer the question; the target's other columns are labels.
 answer_columns = ["returned_order_share"]

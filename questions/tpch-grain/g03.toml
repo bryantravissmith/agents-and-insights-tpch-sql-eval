@@ -13,6 +13,13 @@ WHERE p_brand = 'Brand#45' AND o_orderdate >= DATE '1996-01-01' AND o_orderdate 
 GROUP BY n_name
 ORDER BY nation
 '''
+# The tempting query at the wrong grain (see the note): never correct; analysis checks whether a run's
+# answer equals it.
+tempting_sql = '''
+SELECT n_name, count(*) FROM orders JOIN lineitem ON l_orderkey = o_orderkey JOIN part ON p_partkey = l_partkey
+JOIN customer ON c_custkey = o_custkey JOIN nation ON n_nationkey = c_nationkey
+WHERE p_brand = 'Brand#45' AND year(o_orderdate) = 1996 GROUP BY 1 ORDER BY 1
+'''
 
 # The columns that answer the question; the target's other columns are labels.
 answer_columns = ["customers"]
