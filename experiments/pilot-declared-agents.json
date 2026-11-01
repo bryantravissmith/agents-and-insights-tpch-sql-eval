@@ -1,0 +1,20 @@
+[
+ {
+  "harness": "claude",
+  "model": "claude-sonnet-5-5",
+  "extra_args": ["--effort", "medium", "--disable-slash-commands"],
+  "label": "claude:sonnet-5.5"
+ },
+ {
+  "harness": "pi",
+  "model": "openai/gpt-6.1-sol",
+  "extra_args": ["--thinking", "medium"],
+  "label": "pi:gpt-6.1-sol"
+ },
+ {
+  "harness": "pi",
+  "model": "xai/grok-4.7",
+  "extra_args": ["--thinking", "medium"],
+  "label": "pi:grok-4.7"
+ }
+]
