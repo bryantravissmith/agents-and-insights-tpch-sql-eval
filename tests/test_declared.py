@@ -188,7 +188,12 @@ def test_a_declared_grain_must_be_unique_and_must_match_the_reference(synthetic_
     # One row per segment for two of three segments: the grain differs from the reference's.
     fewer = "SELECT * FROM (VALUES ('AUTOMOBILE', 1.5), ('BUILDING', 2.25)) t(s, a)"
     g, _ = grade_declared(fewer, ["a"], SEGMENTS, answers, synthetic_db, grain=["s"])
-    assert g.verdict == "grain_differs" and "2 rows" in g.detail and "segment" in g.detail
+    # The same grain (segments) with a segment missing: other rows, not another grain.
+    assert g.verdict == "rows_differ" and "2 rows" in g.detail and "missing ['machinery']" in g.detail
+    # A different grain altogether (regions, where the reference has segments): grain_differs.
+    regions = "SELECT * FROM (VALUES ('AFRICA', 1.5), ('ASIA', 2.25)) t(r, a)"
+    g, _ = grade_declared(regions, ["a"], SEGMENTS, answers, synthetic_db, grain=["r"])
+    assert g.verdict == "grain_differs" and "segment" in g.detail
     # The right grain, written in lower case: pairs and passes; the grain is recorded.
     right = "SELECT * FROM (VALUES ('machinery', 3.0), ('automobile', 1.5), ('building', 2.25)) t(s, a)"
     g, notes = grade_declared(right, ["a"], SEGMENTS, answers, synthetic_db, grain=["s"])

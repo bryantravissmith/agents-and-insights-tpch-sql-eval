@@ -68,8 +68,8 @@ def main(batch: str) -> None:
         decl = read_declaration(run_dir)
         if decl is not None and decl.grain is not None:
             use[r["agent"]]["declared a grain"] += 1
-            use[r["agent"]]["grain not unique"] += r["verdict"] == "grain_not_unique"
-            use[r["agent"]]["grain differs"] += r["verdict"] == "grain_differs"
+            use[r["agent"]]["grain not unique"] += declared.verdict == "grain_not_unique"
+            use[r["agent"]]["grain differs"] += declared.verdict == "grain_differs"
     print(f"# Declared-columns batch {batch}\n")
     print("Correct runs. grid: the same agents' terse runs on 2026-10-31 (prompt without the declare sentence).")
     print("declared / whole result: this batch's runs graded by their declared columns / by today's rule.\n")

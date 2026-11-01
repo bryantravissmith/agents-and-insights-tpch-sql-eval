@@ -20,8 +20,10 @@ interchangeable columns, such as a customer's key or name: either one answers it
 
 A batch can also ask for the grain (`run --declare-grain`): the columns that identify one row of the result, empty
 for a one-row answer. A declared grain must be unique in the run's own result (else grain_not_unique, as when a
-fan-out join repeats a row), and only its columns may pair rows with the reference's labels; a different number
-of rows than the reference is grain_differs. Both verdicts are wrong answers that name the grain error.
+fan-out join repeats a row), and only its columns may pair rows with the reference's labels. With a different
+number of rows than the reference, a grain whose values contain the reference's labels (or are contained in them)
+is the same grain with other rows (rows_differ, naming the extra or missing values, such as a streak length of 0);
+otherwise the grain itself differs (grain_differs). Both are wrong answers that name the error.
 
 When the labels cannot be paired (other rows, a label in a form not normalized, or a reference whose labels do
 not identify its rows), `grade_declared` returns None and the caller grades the run as if nothing was declared;
@@ -111,6 +113,31 @@ def _pair_labels(
         return None
 
     return search(0, frozenset(), [])
+
+
+def _same_grain(got: Result, exp: Result, labels: list[int], grain_idx: list[int]) -> str:
+    """Whether a declared grain is the reference's grain with other rows: every reference label has a grain
+    column whose values contain the label's or are contained in them. Returns which label values are extra or
+    missing ("" when the grain itself differs)."""
+    found = []
+    for j in labels:
+        exp_vals = set(normalize_column(r[j] for r in exp.rows))
+        for i in grain_idx:
+            got_vals = set(normalize_column(r[i] for r in got.rows))
+            if got_vals <= exp_vals or got_vals >= exp_vals:
+                found.append(
+                    (exp.columns[j], sorted(map(str, got_vals - exp_vals)), sorted(map(str, exp_vals - got_vals)))
+                )
+                break
+        else:
+            return ""
+    parts = [
+        f"{name}: "
+        + ", ".join(p for p in (f"extra {extra[:5]}" if extra else "", f"missing {miss[:5]}" if miss else "") if p)
+        for name, extra, miss in found
+        if extra or miss
+    ]
+    return "the same grain, other rows: " + ("; ".join(parts) or "repeated label values")
 
 
 def _assign(got_rows, exp_rows, n_got: int, slots: list[list[int]]) -> dict[int, int]:
@@ -273,6 +300,10 @@ def grade_declared(
         if grain_idx is not None and len(got.rows) != len(exp.rows):
             ref = [exp.columns[j] for j in labels]
             detail = f"{len(got.rows)} rows at the grain {notes['grain']}; the reference has {len(exp.rows)} at {ref}"
+            if same := _same_grain(got, exp, labels, grain_idx):  # the same grain, other rows
+                return Grade(
+                    "rows_differ", rows_got=len(got.rows), rows_expected=len(exp.rows), detail=f"{detail}; {same}"
+                ), notes | {"grain_matches": True}
             return Grade("grain_differs", rows_got=len(got.rows), rows_expected=len(exp.rows), detail=detail), notes
         return None
     label_cols, rows = paired
