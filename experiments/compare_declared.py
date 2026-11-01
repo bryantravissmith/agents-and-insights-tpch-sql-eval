@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 from evalkit import grading, load_questions
+from evalkit.declared import grade_task, read_declaration
 
 GRID = [
     "20261031-102010-full-grid-openai",
@@ -51,7 +52,9 @@ def main(batch: str) -> None:
         task = tasks[(r["task"], r["level"])]
         sql = (run_dir / "answer.sql").read_text() if (run_dir / "answer.sql").exists() else None
         whole = grading.grade_any(sql, task.target_sql, task.accepted_sql, task.db)[0]
-        pilot[k][0] += int(r["correct"])
+        # Graded again with the current markings, not as stored at run time.
+        declared = grade_task(sql, read_declaration(run_dir), task, task.db)[0]
+        pilot[k][0] += int(declared.correct and r["sql_source"] == "submit")
         pilot[k][1] += int(whole.correct and r["sql_source"] == "submit")
         pilot[k][2] += 1
         d = r.get("declaration") or {}

@@ -3,10 +3,11 @@ db = "../../tpch.duckdb"                         # relative to this file
 target_sql_file = "../../tpch/queries/q02.sql"
 note = "Minimum cost supplier. Correlated MIN(supply cost) subquery must keep the same region filter as the outer query."
 
-# The columns that answer the question; the target's other columns are labels.
-answer_columns = ["p_partkey", "s_name"]
+# The answer is a supplier for each part: s_name answers, and the part says which row is which. The part must be
+# in the result for rows to pair but need not be declared; a bare list of suppliers cannot pair and is wrong.
+answer_columns = ["s_name"]
 # Labels say which row is which; columns in neither list are context, not graded.
-label_columns = []
+label_columns = ["p_partkey"]
 
 [[levels]]
 name = "terse"
