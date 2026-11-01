@@ -47,6 +47,9 @@ class Task:
     # The target's columns that say which row is which (a month, a segment). None: every non-answer column.
     # Columns in neither list are context: not graded and not used to pair rows.
     label_columns: tuple[str, ...] | None = None
+    # Context columns that are optional but must be right when an answer shows them, such as q21's count of late
+    # orders beside "which suppliers" (see declared._shown_context). Only numeric columns are checked.
+    checked_columns: tuple[str, ...] = ()
     # The briefs of the more specified levels of the same question, in ladder order: what ask_clarification
     # reveals, one per ask, in --ask-step batches. Levels with their own target ask another question and are left out.
     next_briefs: tuple[str, ...] = ()
@@ -150,6 +153,9 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
         labels = lv.get("label_columns", None if lv_target is not target else spec.get("label_columns"))
         if labels is not None and not (isinstance(labels, list) and all(isinstance(c, str) for c in labels)):
             raise ValueError(f"{path}:{lv['name']}: label_columns must be a list of column names")
+        checked = lv.get("checked_columns", [] if lv_target is not target else spec.get("checked_columns", []))
+        if not (isinstance(checked, list) and all(isinstance(c, str) and c.strip() for c in checked)):
+            raise ValueError(f"{path}:{lv['name']}: checked_columns must be a list of column names")
         brief = lv["prompt"].strip()
         briefs.append((brief, lv_target is target))
         prompt = brief if lv.get("raw") or not preamble else f"{preamble}\n\n{brief}"
@@ -164,6 +170,7 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
                 accepted_sql=tuple(a.strip() for a in accepted),
                 answer_columns=tuple(tuple(c.strip() for c in s) for s in slots),
                 label_columns=None if labels is None else tuple(c.strip() for c in labels),
+                checked_columns=tuple(c.strip() for c in checked),
             )
         )
     if not tasks:

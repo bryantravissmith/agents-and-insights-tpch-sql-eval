@@ -100,6 +100,7 @@ Each file marks what its target's columns are for, used when a run declares its 
 - `answer_columns`: the columns that answer the question. An entry is a name, or a list of names that each answer it alone, such as `["c_custkey", "c_name"]`: a customer's key or name.
 - `label_columns`: the columns that say which row is which (a month, a segment). When the key is left out, every non-answer column is a label.
 - **Context:** a column in neither list (a supplier's address beside "which suppliers") is not graded and not used to pair rows.
+- `checked_columns`: context numbers that are optional but must be right when an answer shows them, such as q21's count of late orders beside the supplier names. Agents name columns their own way, so the grader matches by value: if an answer shows a number beside the matched rows and it equals no checked column, the run is `values_differ`. A supplier key beside the names isn't a shown count. The check is opt-in per question because it guesses which number is which: on q10, agents add numbers of their own (returned quantity) that would be wrongly blamed for the reference's account balance. On the 2026-10-31 grid it changes 23 of 157 q21 terse runs from correct to wrong, all of them showing counts that differ from the reference (43 where it has 12), and no other run.
 
 "Which ..." questions set `label_columns = []`: their answer is an identity, and the rest is context. The markings are judgment calls, drafted for all 46 files on 2026-11-01 and awaiting review.
 

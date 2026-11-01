@@ -575,8 +575,9 @@ def preflight(
             if t.answer_columns:
                 cols = {c.lower() for c in grading.expected_result(t.target_sql, resolve_db(t, db)).columns}
                 named = [c for slot in t.answer_columns for c in slot] + list(t.label_columns or ())
+                named += list(t.checked_columns)
                 if unknown := [c for c in named if c.lower() not in cols]:
-                    problems.append(f"{t.name}: answer or label columns {unknown} are not columns of its target")
+                    problems.append(f"{t.name}: answer, label or checked columns {unknown} are not in its target")
     if problems:
         raise SystemExit("preflight failed:\n  " + "\n  ".join(problems))
 

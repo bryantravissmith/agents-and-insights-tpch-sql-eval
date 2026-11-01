@@ -7,6 +7,8 @@ note = "Saudi suppliers who alone made a multi-supplier order late. Trap: EXISTS
 answer_columns = ["s_name"]
 # Labels say which row is which; columns in neither list are context, not graded.
 label_columns = []
+# Context that must be right when an answer shows it: the count beside the names.
+checked_columns = ["numwait"]
 
 [[levels]]
 name = "terse"

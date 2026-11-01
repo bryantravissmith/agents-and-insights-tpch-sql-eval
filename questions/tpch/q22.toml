@@ -7,6 +7,8 @@ note = "Global sales opportunity. Country code = first two phone digits; average
 answer_columns = ["numcust"]
 # Labels say which row is which; columns in neither list are context, not graded.
 label_columns = ["cntrycode"]
+# Context that must be right when an answer shows it: the balance beside the count.
+checked_columns = ["totacctbal"]
 
 [[levels]]
 name = "terse"

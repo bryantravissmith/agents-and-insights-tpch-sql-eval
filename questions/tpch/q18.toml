@@ -7,6 +7,8 @@ note = "Large volume customer. HAVING SUM(quantity) > 300 per order; LIMIT 100 b
 answer_columns = [["c_custkey", "c_name"]]
 # Labels say which row is which; columns in neither list are context, not graded.
 label_columns = []
+# Context that must be right when an answer shows it: each large order's price and quantity.
+checked_columns = ["o_totalprice", "sum(l_quantity)"]
 
 [[levels]]
 name = "terse"

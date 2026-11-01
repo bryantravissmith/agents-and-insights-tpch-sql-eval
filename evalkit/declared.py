@@ -164,6 +164,45 @@ def _assign(got_rows, exp_rows, n_got: int, slots: list[list[int]]) -> dict[int,
     return best
 
 
+def _numeric(res: Result, i: int) -> bool:
+    vals = [r[i] for r in res.rows if r[i] is not None]
+    return bool(vals) and all(isinstance(v, (int, float)) for v in vals)
+
+
+_KEY_NAME = re.compile(r"(key|id)$", re.IGNORECASE)
+
+
+def _identifies(res: Result, i: int, j: int) -> bool:
+    """Whether column i is a row identifier for column j: named like one (s_suppkey, supplier_id) and in one-to-one
+    correspondence with it. The name matters: a count with no ties also maps one-to-one onto the names."""
+    pairs = {(r[i], r[j]) for r in res.rows}
+    one_to_one = len(pairs) == len({r[i] for r in res.rows}) == len({r[j] for r in res.rows})
+    return one_to_one and bool(_KEY_NAME.search(res.columns[i]))
+
+
+def _shown_context(got: Result, exp: Result, extra: list[int], got_used: list[int], context: list[int], same) -> str:
+    """Why a shown context value is wrong ("" when none is). `context` holds the question's checked columns
+    (`checked_columns`): context, so optional, but the number an answer would show beside it, like q21's count of
+    late orders beside "which suppliers". A declared column that shows one must be right. Agents name columns their
+    own way, so the check goes by values: a declared extra column i shows checked column j when `same(i, j)`, its
+    values equal j's on the rows as already paired. A numeric checked column nobody matched is shown wrong when an
+    unmatched extra column is numeric too; row identifiers, such as a key beside the matched name (`got_used`),
+    never count. That guess is why the check is opt-in per question: on q10, agents add numbers of their own
+    (returned quantity) that the reference's unrelated account balance would wrongly fail."""
+    shown, unmatched = set(), []
+    for j in context:
+        hit = next((i for i in extra if i not in shown and same(i, j)), None)
+        if hit is None:
+            unmatched.append(j)
+        else:
+            shown.add(hit)
+    rest = [i for i in extra if i not in shown and not any(_identifies(got, i, k) for k in got_used)]
+    for j in (j for j in unmatched if _numeric(exp, j)):
+        if wrong := [i for i in rest if _numeric(got, i)]:
+            return f"shows {got.columns[wrong[0]]} where the reference's {exp.columns[j]} differs"
+    return ""
+
+
 def _slot_name(exp: Result, slot: list[int]) -> str:
     return " or ".join(exp.columns[j] for j in slot)
 
@@ -223,6 +262,7 @@ def grade_task(candidate_sql: str | None, declared: Declaration | None, task, db
             db,
             task.label_columns,
             grain=None if declared.grain is None else list(declared.grain),
+            checked_columns=task.checked_columns,
         )
         if hit is not None:
             return hit[0], 0, hit[1] | {"graded_by": "declared columns"}
@@ -238,8 +278,11 @@ def grade_declared(
     db: Path,
     label_columns: tuple[str, ...] | None = None,
     grain: list[str] | None = None,
+    checked_columns: tuple[str, ...] = (),
 ) -> tuple[Grade, dict] | None:
     """Grade the declared columns against the reference's answer columns; None means fall back to grade_any.
+
+    `checked_columns` are context columns that must be right when a declared column shows them (`_shown_context`).
 
     `declared` None means every result column, which is how saved runs that declared nothing can be checked.
     `grain` is the run's declared grain, the columns that identify one of its rows. When given, it must be unique
@@ -268,6 +311,10 @@ def grade_declared(
     else:  # the rest are context: neither graded nor used to pair rows
         wanted = {c.lower() for c in label_columns}
         labels = [j for j, c in enumerate(exp.columns) if c.lower() in wanted]
+    checked_names = {c.lower() for c in checked_columns}
+    context = [
+        j for j, c in enumerate(exp.columns) if j not in in_slots and j not in labels and c.lower() in checked_names
+    ]
     notes = {"declared": [got.columns[i] for i in dec], "answers": [_slot_name(exp, s) for s in slots]}
     grain_idx = None
     if grain is not None:
@@ -294,6 +341,15 @@ def grade_declared(
                 best = (rank, trial, chosen)
         _, g, chosen = best
         g.column_map = [dec[i] for i in g.column_map] if g.column_map else None
+        # An exact match leaves no column map: the declared columns are the answers, in order.
+        used, chosen_exp = (list(g.column_map) if g.column_map else list(dec)), list(chosen)
+
+        def same_rows(i, j):  # no labels: the rows pair as a set, with the matched answers alongside
+            return compare(_project(got, used + [i]), _project(exp, chosen_exp + [j])).correct
+
+        extra = [i for i in dec if i not in used]
+        if g.correct and (why := _shown_context(got, exp, extra, used, context, same_rows)):
+            g = Grade("values_differ", rows_got=len(got.rows), rows_expected=len(exp.rows), detail=why)
         return g, notes | {"matched": [exp.columns[j] for j in chosen]}
     paired = _pair_labels(got, exp, labels, allowed=grain_idx)
     if paired is None:
@@ -321,6 +377,15 @@ def grade_declared(
         g.verdict = "exact" if len(dec) == len(slots) else "extra_columns"
         extra = [got.columns[dec[i]] for i in range(len(dec)) if i not in match.values()]
         g.detail = f"answers line up as {lined_up}" + (f"; extra declared {extra}" if extra else "")
+
+        def same_paired(i, j):  # rows already paired by their labels
+            return all(cell_eq(got.rows[rows[k]][i], exp.rows[k][j]) for k in range(len(exp.rows)))
+
+        used = list(label_cols) + [dec[i] for i in match.values()]
+        others = [dec[i] for i in range(len(dec)) if dec[i] not in used]
+        if why := _shown_context(got, exp, others, used, context, same_paired):
+            g = Grade("values_differ", rows_got=len(got.rows), rows_expected=len(exp.rows), detail=why)
+            g.column_map = [dec[match[s]] for s in range(len(slots))]
     elif len(match) == len(dec):
         g.verdict = "missing_columns"
         missing = [_slot_name(exp, slots[s]) for s in range(len(slots)) if s not in match]

@@ -39,6 +39,26 @@ def test_normalize_column_reads_the_same_label_written_different_ways():
     assert normalize_column(["1997-03-15", None]) == ["1997-03-15", None]  # a plain day stays a day
 
 
+def test_a_shown_checked_count_must_be_right(synthetic_db):
+    # q21's shape: "which suppliers", with a count of late orders as checked context.
+    ref = "SELECT * FROM (VALUES ('S1', 16), ('S2', 12), ('S3', 9)) t(s_name, numwait)"
+
+    def grade(sql, checked=("numwait",), labels=()):
+        return grade_declared(sql, None, ref, (("s_name",),), synthetic_db, labels, checked_columns=checked)[0]
+
+    names = "SELECT * FROM (VALUES (1, 'S1'), (2, 'S2'), (3, 'S3')) t(s_suppkey, s_name)"
+    assert grade(names).correct  # the count is optional, and a supplier key beside the names is not a count
+    right = "SELECT * FROM (VALUES ('S3', 9), ('S1', 16), ('S2', 12)) t(supplier, late_orders)"
+    assert grade(right).correct
+    wrong = "SELECT * FROM (VALUES (1, 'S1', 43), (2, 'S2', 42), (3, 'S3', 7)) t(s_suppkey, supplier, late_orders)"
+    g = grade(wrong)
+    assert g.verdict == "values_differ" and "late_orders" in g.detail and "numwait" in g.detail
+    assert grade(wrong, checked=()).correct  # unchecked context is never graded
+    # With labels pairing the rows, the shown value is compared row by row.
+    assert grade(wrong, labels=("s_name",)).verdict == "values_differ"
+    assert grade(right, labels=("s_name",)).correct
+
+
 def test_labels_pair_rows_so_right_values_on_wrong_labels_fail(synthetic_db):
     answers = (("avg_orders",),)
     right = "SELECT * FROM (VALUES ('machinery', 3.0, 7), ('automobile', 1.5, 7), ('building', 2.25, 7)) t(s, a, n)"
