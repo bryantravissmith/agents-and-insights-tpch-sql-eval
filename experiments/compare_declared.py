@@ -65,6 +65,11 @@ def main(batch: str) -> None:
         use[r["agent"]]["bad declaration"] += r["verdict"] == "bad_declaration"
         labels = {c.lower() for c in (d.get("labels") or {}).values()}
         use[r["agent"]]["declared a label too"] += bool(labels & {c.lower() for c in d.get("declared", [])})
+        decl = read_declaration(run_dir)
+        if decl is not None and decl.grain is not None:
+            use[r["agent"]]["declared a grain"] += 1
+            use[r["agent"]]["grain not unique"] += r["verdict"] == "grain_not_unique"
+            use[r["agent"]]["grain differs"] += r["verdict"] == "grain_differs"
     print(f"# Declared-columns batch {batch}\n")
     print("Correct runs. grid: the same agents' terse runs on 2026-10-31 (prompt without the declare sentence).")
     print("declared / whole result: this batch's runs graded by their declared columns / by today's rule.\n")
@@ -83,7 +88,7 @@ def main(batch: str) -> None:
         print(
             f"| {a} | {g0}/{g1} ({100 * g0 / g1:.0f}%) | {d0}/{n} ({100 * d0 / n:.0f}%) | {w0}/{n} ({100 * w0 / n:.0f}%) |"
         )
-    cols = list(next(iter(use.values())).keys())
+    cols = list(dict.fromkeys(k for c in use.values() for k in c))
     print("\n| agent | " + " | ".join(cols) + " |")
     print("|---" * (len(cols) + 1) + "|")
     for a, c in sorted(use.items()):
