@@ -46,7 +46,7 @@ from evalkit import (
     style,
     summarize,
 )
-from evalkit.runner import DB, new_batch_id, reparse, resume
+from evalkit.runner import DB, new_batch_id, reparse, rescore, resume
 
 
 def _grid_args(p: argparse.ArgumentParser):
@@ -174,6 +174,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("reparse", help="recompute turns, tokens and cost from saved transcripts (after a parser fix)")
     p.add_argument("batch", help="batch id (the folder name under results/)")
 
+    p = sub.add_parser("rescore", help="recompute correct from recorded verdicts under the current grading rule")
+    p.add_argument("batch", help="batch id (the folder name under results/)")
+
     args = ap.parse_args(argv)
     if args.cmd == "report":
         rep = report.build(report.load_rows(args.batches), report.question_sets())
@@ -198,6 +201,9 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "reparse":
         reparse(args.batch)
+        return 0
+    if args.cmd == "rescore":
+        rescore(args.batch)
         return 0
     if args.cmd == "resume":
         caps = {k: int(v) for k, v in (s.split("=", 1) for s in args.harness_jobs)}

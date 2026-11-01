@@ -15,8 +15,10 @@ Verdicts, best to worst:
   columns_differ     different column count and no projection lines up
   sql_error          candidate failed to execute (or was refused by the blocklist)
   no_sql             nothing to grade
-The first three count as correct; the runner also requires the SQL to have come from submit_sql.
-LENIENT adds extra_columns: the right rows, plus columns nobody asked for.
+The first four count as correct; the runner also requires the SQL to have come from submit_sql. Extra columns
+are correct because they do not change the answer: every column the reference asks for is there with the right
+values. The verdict still says extra_columns, so reports can note them. EXACT_COLUMNS is the stricter set,
+kept for that note.
 """
 
 from __future__ import annotations
@@ -33,8 +35,9 @@ import duckdb
 
 from sqlguard import ENGINE_CONFIG, refuse
 
-CORRECT = frozenset({"exact", "exact_unordered", "columns_reordered"})
-LENIENT = CORRECT | {"extra_columns"}
+EXACT_COLUMNS = frozenset({"exact", "exact_unordered", "columns_reordered"})
+CORRECT = EXACT_COLUMNS | {"extra_columns"}
+LENIENT = CORRECT  # correct wherever the SQL came from; see RunResult.lenient
 REL_TOL = 1e-12  # floating-point aggregation noise, not a business-error allowance
 QUERY_TIMEOUT_S = 120
 
@@ -271,16 +274,17 @@ def grade_sql(candidate_sql: str | None, target_sql: str, db: Path) -> Grade:
 def grade_any(candidate_sql: str | None, target_sql: str, accepted: tuple[str, ...], db: Path) -> tuple[Grade, int]:
     """Grade against the target and any accepted alternatives; returns the grade and which reference it used.
 
-    An alternative is another reading the question's author accepts as right, such as a month given as a date or
-    as 'YYYY-MM'. One reference written by one author encodes that author's conventions; alternatives keep the
-    grader from scoring agreement with them. Reference 0 is the target. The first correct match wins, then the
-    first lenient one; with neither, the grade is against the target, so the miss is diagnosed against it.
+    An alternative is the same answer in another form, such as a month given as a date or as 'YYYY-MM': one
+    reference fixes one representation, and a representation is not part of the answer. Alternatives are not
+    for other definitions; the target's definitions are the rubric. Reference 0 is the target. The first correct
+    match wins, preferring one with exactly the reference's columns; with none, the grade is against the target,
+    so the miss is diagnosed against it.
     """
     primary = grade_sql(candidate_sql, target_sql, db)
-    if primary.correct or not accepted or primary.verdict in ("no_sql", "sql_error"):
+    if primary.verdict in EXACT_COLUMNS or not accepted or primary.verdict in ("no_sql", "sql_error"):
         return primary, 0
     grades = [primary] + [grade_sql(candidate_sql, alt, db) for alt in accepted]
-    for ok in (lambda g: g.correct, lambda g: g.verdict in LENIENT):
+    for ok in (lambda g: g.verdict in EXACT_COLUMNS, lambda g: g.correct):
         for i, g in enumerate(grades):
             if ok(g):
                 return g, i

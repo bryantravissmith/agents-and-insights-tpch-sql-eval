@@ -27,36 +27,53 @@ Six questions written for this eval on 2026-10-31, on the same database with the
 
 Run them alongside the TPC-H ladder (`uv run evals.py run questions/tpch questions/tpch-novel ...`). The gap between memorized and novel questions is itself a result.
 
-**Who wrote these, and what that did.** The novel and hard questions and their reference SQL were drafted by Claude Opus 5.5 in Claude Code and checked by hand. On the terse rung, four references carried that model's habits: a count or a denominator the brief never asks for (n01, n06), a month as a `'YYYY-MM'` string (n04), and a revenue column where the brief asks only who (n03). The grader compares columns, so the agents that share those habits, the Claude models, scored higher on the terse rung. Graded against the v2 references below, the same saved answers flip: on n01 and n06, Claude models go from 59 of 80 runs correct to 3, and the other agents from 5 of 192 to 186. With extra columns allowed, both groups are near 100%. Read v1 terse novel results as agreement with one author's conventions, not as skill.
+**Who wrote these, and what that did.** The novel and hard questions and their reference SQL were drafted by Claude Opus 5.5 in Claude Code and checked by hand. On the terse rung, several references carried that model's habits:
+- columns the brief never asks for: a count or a denominator on n01 and n06, a revenue column on n03 where the brief asks only who, two statistics on h02, a share on h03;
+- one form of a value: a month as a `'YYYY-MM'` string on n04.
+
+The grader compares columns and values, so the agents that share those habits, the Claude models, scored higher. Graded against the v2 references below, the same saved answers show it. On n01 and n06, requiring exactly the reference's columns, Claude models go from 59 of 80 runs to 3 and the other agents from 5 of 192 to 186. Under the grading rule below, both groups are near 100%. Read v1 terse results on these sets as partly agreement with one author's habits.
+
+## How the terse rung is graded: ambiguity, by design
+
+A terse brief leaves definitions open on purpose: what "order size" means, which date puts an item in a year, how close orders must be to form a spree. That is what the rung tests. The question's intended definition, in the reference SQL and the file's `note`, is the rubric. **An agent that assumes another reasonable definition is graded wrong**, even when its reading is defensible, and the note says which readings are graded that way.
+
+The rung rewards asking, or at least stating the assumption. A run is headless, though: nobody answers, and the shared preamble tells the agent to submit when confident and state its assumptions. In the 2026-10-31 grid, 4 of 4,623 graded terse runs asked instead of answering; the final message's assumptions are kept for review, not graded.
+
+What is not part of the definition is not graded:
+- **Columns:** the reference returns only what the brief asks for. Extra columns are correct, and the verdict (`extra_columns`) notes them. A column the brief asks for that is missing is wrong.
+- **Order:** column order and row order are not graded (unless a brief asks for a sort).
+- **Representation:** the same value in another form is correct, through `accepted_sql` (below). A month as a date, a timestamp, `'1997-01'`, a number or a name is the same month.
 
 ## Novel questions, version 2 (`tpch-novel-v2/`)
 
-The terse rung of the six novel questions, with references that return only what each terse brief asks and `accepted_sql` alternatives where a correct answer has more than one form (a month as a date, a timestamp, `'YYYY-MM'`, a number or a name; a year as a number or text; day 90 included or not). The prompts are identical to v1's, so every saved v1 terse run is also a valid v2 run: `uv run evals.py regrade <batches> --questions questions/tpch-novel-v2 --name novel-v2` grades them again without running an agent. n02 and n05 are unchanged; their re-grade reproduces v1's grades exactly. The v2 references were drafted by the same model and reviewed by GPT-6.1 Sol (a different model family). The review's data-dependent points were checked against the database; a human review is still owed.
+The terse rung of the six novel questions:
+- the same prompts as v1, and the same definitions;
+- references that return only what each terse brief asks;
+- `accepted_sql` for other forms of the same value: n01's year as a number, text or a year-start timestamp; n04's month in six forms.
 
-Two readings are still decided by the author, not the brief: "biggest customer" (n03v2) is ranked by money spent, not by number of orders, and the n05 average counts customers with no 1995 orders as zero.
+Every saved v1 terse run is also a valid v2 run, so `uv run evals.py regrade <batches> --questions questions/tpch-novel-v2 --name novel-v2` grades them again without running an agent. n02 and n05 are unchanged, and their re-grade reproduces v1's grades exactly. The v2 references were drafted by the same model and reviewed by GPT-6.1 Sol, a different model family. The review's data-dependent points were checked against the database; a human review is still owed.
 
-## Hard questions, version 2 (`tpch-hard-v2/`): provisional
+## Hard questions, version 2 (`tpch-hard-v2/`)
 
-The terse rung of the six hard questions, built the same way as the novel v2 (same prompts, so `evals.py regrade` grades the saved runs). On the terse rung, the v1 hard references did more than the brief asked:
-- **Extra columns:** h02, h03, h04 and h06 return columns the brief never asks for.
-- **Settled choices the brief leaves open:**
-  - h04: "order size" as net line revenue, where 121 of 125 runs used the order's total price;
-  - h06: the year assigned by ship date, where most runs used receipt date;
-  - h05: 1993 compared with 1992;
-  - h02: a 30-day spree gap that counts single orders as sprees.
+The terse rung of the six hard questions, built the same way:
+- the same prompts and definitions as v1;
+- references that return only what each terse brief asks: h02's spree count, h03's number of customers, h04's percentile, h06's supplier names. h01 and h05 are unchanged.
 
-v2 returns only what each brief asks and accepts alternatives for those choices. On the same 810 saved runs, graded with extra columns allowed, the terse rung goes from 65 runs passing to 651 (h01 is unchanged at 64).
+Each note names the reasonable readings that are graded wrong:
+- **h04:** "order size" as the order's total price (121 of 125 terse runs);
+- **h06:** the year by receipt date (the most common choice);
+- **h05:** a blank change for 1993;
+- **h02:** a 7-day gap with at least two orders (the most common choice).
 
-**Read v2 as an upper bound, not a score.** A review by GPT-6.1 Sol, a different model family, found that a list of accepted answers cannot settle an open definition:
-- h02 ("orders close together") has no right threshold.
-- h05 and h06 leave several choices open at once (the comparison window, the ranking method, the date that assigns the year, ties at the cut-off).
-- The alternatives were chosen partly by looking at what most agents did, which grades toward the agents' answers.
+Re-graded, the 810 saved hard terse runs score 288 correct. The column fix alone moves h03 from 0 to 134 of 135; h04 stays at 0, all of it the order-size reading.
 
-The hard terse rung asks questions an exact-match grader can't score. Use the stakeholder and spec rungs, whose briefs define the terms, to compare agents on the hard set. To make the terse rung gradable, the brief has to state the definition (a new prompt, so new runs).
+A cross-family review argued for accepting those other readings instead. Accepted alternatives were briefly used that way and were removed, because an alternative definition makes the rung stop testing ambiguity. Choosing them from what most agents did would also grade toward the agents.
 
 ## Accepted alternatives
 
-A question file, or a level, may list `accepted_sql = ['''...''', ...]`: other queries whose results also count as correct. The grader tries the target first, then each alternative, and takes the first correct match (then the first lenient one); `result.json` records which in `reference` (0 is the target). Use it for representations of the same answer, not for different questions. An alternative belongs to the target it sits beside: a level with its own target does not inherit the file's alternatives.
+A question file, or a level, may list `accepted_sql = ['''...''', ...]`: other queries whose results are **the same answer in another form**. The grader tries the target first, then each alternative, and takes the first correct match, preferring one with exactly the reference's columns. `result.json` records which in `reference` (0 is the target).
+
+Alternatives are for representations, never for other definitions: on a terse brief the definition is the rubric. An alternative belongs to the target it sits beside, so a level with its own target does not inherit the file's alternatives.
 
 ## Hard novel questions (`tpch-hard/`)
 

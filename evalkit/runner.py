@@ -731,6 +731,40 @@ def resume(
     return results
 
 
+def rescore(batch: str, *, quiet: bool = False) -> int:
+    """Recompute `correct` and `lenient` from each run's recorded verdict under the current grading rule.
+
+    For a change of rule, not of grader: verdicts, SQL and usage are untouched, nothing runs again. A run whose
+    score changes keeps the previous one in `rescored` (when, and what it was); the manifest's `rescored` list
+    says when, with which commit and how many changed. Returns the number of runs whose score changed.
+    """
+    batch_dir = RESULTS / batch
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    changed = Counter()
+    for result in sorted(batch_dir.glob("*/result.json")):
+        row = json.loads(result.read_text())
+        correct = int(row.get("verdict") in grading.CORRECT and row.get("sql_source") == "submit")
+        lenient = int(row.get("verdict") in grading.LENIENT)
+        if (correct, lenient) == (int(row.get("correct") or 0), int(row.get("lenient") or 0)):
+            continue
+        row.setdefault("rescored", []).append({"at": now, "correct": row.get("correct"), "lenient": row.get("lenient")})
+        changed[row.get("verdict")] += 1
+        result.write_text(json.dumps(row | {"correct": correct, "lenient": lenient}, indent=2))
+    rows = [json.loads(p.read_text()) for p in sorted(batch_dir.glob("*/result.json"))]
+    if (batch_dir / "results.jsonl").exists():
+        with open(batch_dir / "results.jsonl", "w") as f:
+            f.writelines(json.dumps({k: row.get(k, "") for k in COLS}) + "\n" for row in rows)
+    compact_scorecard(refresh={row["run_dir"]: row for row in rows if row.get("run_dir")})
+    manifest = json.loads((batch_dir / "manifest.json").read_text())
+    manifest.setdefault("rescored", []).append(
+        {"at": now, "git": _git_state(), "correct": sorted(grading.CORRECT), "changed": dict(changed)}
+    )
+    write_manifest(batch_dir, manifest)
+    if not quiet:
+        print(f"batch {batch}: re-scored {sum(changed.values())} runs under the current rule: {dict(changed)}")
+    return sum(changed.values())
+
+
 def reparse(batch: str, *, quiet: bool = False) -> int:
     """Recompute each run's usage fields (turns, tokens, cost) from its saved transcript with the current parsers.
 

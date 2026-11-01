@@ -1,7 +1,7 @@
 id = "n03v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of n03's terse rung, 2026-11-01. The terse brief asks who, so the reference returns region and customer only. v1 also returned net line revenue, so agents that ranked by order total failed on the value column even though the three money measures (order total, net or gross line revenue) pick the same five customers. Biggest by number of orders is a different reading, with four-way ties in three regions; it is not accepted. Same trap: region comes from the customer's nation; the supplier's region picks a different customer in four of five regions."
+note = "Version 2 of n03's terse rung, 2026-11-01. The terse brief asks who, so the reference returns region and customer only. v1 also returned net line revenue, so agents that ranked by order total failed on the value column even though the three money measures (order total, net or gross line revenue) pick the same five customers. Biggest by number of orders is a different reading, with four-way ties in three regions; it is not accepted. Same trap: region comes from the customer's nation; the supplier's region picks a different customer in four of five regions. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 WITH rev AS (
   SELECT r_name, c_name, sum(l_extendedprice * (1 - l_discount)) AS revenue

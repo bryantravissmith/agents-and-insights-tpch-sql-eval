@@ -58,10 +58,14 @@ def test_swapped_columns(db):
     assert (g.verdict, g.column_map, g.correct) == ("columns_reordered", [1, 0], True)
 
 
-def test_extra_column_is_not_correct(db):
+def test_extra_column_is_correct_and_noted(db):
+    # An extra column does not change the answer: correct, with the verdict kept so reports can note it.
     sql = Q04_BODY.replace("count(*) AS order_count", "count(*) AS order_count, 'x' AS note")
     g = grade_sql(sql + "ORDER BY 1", Q04, db)
-    assert (g.verdict, g.correct) == ("extra_columns", False)
+    assert (g.verdict, g.correct) == ("extra_columns", True)
+    # A missing column is not: part of the answer is absent.
+    sql = Q04_BODY.replace(", count(*) AS order_count", "")
+    assert grade_sql(sql + "ORDER BY 1", Q04, db).correct is False
 
 
 def test_fan_out_join_is_values_differ(db):
@@ -374,6 +378,29 @@ def test_resume_reruns_quota_failures_recorded_without_detail(sandbox, monkeypat
     assert harnesses.get("agy").parse(None, r.run_dir / "transcript.jsonl").error == f"status=ERROR: {quota}"
     runner.resume("quota", questions=[qdir], quiet=True)
     assert json.loads((r.run_dir / "result.json").read_text())["verdict"] == "exact"
+
+
+def test_rescore_applies_the_current_rule_and_keeps_the_old_score(sandbox):
+    batch = sandbox / "results" / "rs"
+    rows = {
+        "extra": {"verdict": "extra_columns", "sql_source": "submit", "correct": 0, "lenient": 1},
+        "extra-unsubmitted": {"verdict": "extra_columns", "sql_source": "last_query", "correct": 0, "lenient": 1},
+        "exact": {"verdict": "exact", "sql_source": "submit", "correct": 1, "lenient": 1},
+    }
+    for name, row in rows.items():
+        (batch / name).mkdir(parents=True)
+        full = {k: "" for k in runner.COLS} | row | {"batch": "rs", "run_dir": f"results/rs/{name}"}
+        (batch / name / "result.json").write_text(json.dumps(full))
+        runner.append_scorecard(full)
+    (batch / "manifest.json").write_text(json.dumps({"batch": "rs"}))
+    assert runner.rescore("rs", quiet=True) == 1  # only the submitted extra-column run changes
+    extra = json.loads((batch / "extra" / "result.json").read_text())
+    assert (extra["correct"], extra["rescored"][0]["correct"]) == (1, 0)
+    assert json.loads((batch / "extra-unsubmitted" / "result.json").read_text())["correct"] == 0
+    assert {r["run_dir"]: r["correct"] for r in runner.load_scorecard("rs")}["results/rs/extra"] == "1"
+    (entry,) = json.loads((batch / "manifest.json").read_text())["rescored"]
+    assert entry["changed"] == {"extra_columns": 1} and "extra_columns" in entry["correct"]
+    assert runner.rescore("rs", quiet=True) == 0  # idempotent
 
 
 def test_reparse_fixes_agy_usage_from_the_transcript(sandbox):

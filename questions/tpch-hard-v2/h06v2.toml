@@ -1,7 +1,7 @@
 id = "h06v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of h06's terse rung, 2026-11-01. The terse brief asks which 5 suppliers, so the reference returns their names; v1 also returned nation, both ranks and the improvement. It does not say which date puts a line item in a year: ship date is the target, and receipt date (the most common choice) and order date are accepted. Same traps: competition ranking (RANK, not DENSE_RANK) within each supplier's own country."
+note = "Version 2 of h06's terse rung, 2026-11-01: returns the five supplier names, which is what the terse brief asks; v1 also returned nation, both ranks and the improvement. Intended: a line item is on time when it is received on or before its commit date and belongs to the year it shipped; suppliers are ranked within their own country with competition ranking (1, 2, 2, 4); ties in improvement break by supplier key. Most agents assigned the year by receipt date, a reasonable reading that this rubric grades wrong. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 WITH rate AS (
   SELECT s_suppkey, s_name, s_nationkey, year(l_shipdate) AS yr,
@@ -18,42 +18,6 @@ FROM both_years
 ORDER BY improvement DESC, s_suppkey
 LIMIT 5
 '''
-# The same with the year assigned by receipt date, then by order date.
-accepted_sql = [
-  '''
-WITH rate AS (
-  SELECT s_suppkey, s_name, s_nationkey, year(l_receiptdate) AS yr,
-         count(*) FILTER (WHERE l_receiptdate <= l_commitdate) / count(*) AS on_time
-  FROM supplier JOIN lineitem ON l_suppkey = s_suppkey
-  WHERE l_receiptdate >= DATE '1995-01-01' AND l_receiptdate < DATE '1997-01-01'
-  GROUP BY ALL),
-rk AS (SELECT *, rank() OVER (PARTITION BY s_nationkey, yr ORDER BY on_time DESC) AS rnk FROM rate),
-both_years AS (
-  SELECT a.s_suppkey, a.s_name, a.rnk - b.rnk AS improvement
-  FROM rk a JOIN rk b ON b.s_suppkey = a.s_suppkey AND a.yr = 1995 AND b.yr = 1996)
-SELECT s_name AS supplier
-FROM both_years
-ORDER BY improvement DESC, s_suppkey
-LIMIT 5
-  ''',
-  '''
-WITH rate AS (
-  SELECT s_suppkey, s_name, s_nationkey, year(o_orderdate) AS yr,
-         count(*) FILTER (WHERE l_receiptdate <= l_commitdate) / count(*) AS on_time
-  FROM supplier JOIN lineitem ON l_suppkey = s_suppkey
-  JOIN orders ON o_orderkey = l_orderkey
-  WHERE o_orderdate >= DATE '1995-01-01' AND o_orderdate < DATE '1997-01-01'
-  GROUP BY ALL),
-rk AS (SELECT *, rank() OVER (PARTITION BY s_nationkey, yr ORDER BY on_time DESC) AS rnk FROM rate),
-both_years AS (
-  SELECT a.s_suppkey, a.s_name, a.rnk - b.rnk AS improvement
-  FROM rk a JOIN rk b ON b.s_suppkey = a.s_suppkey AND a.yr = 1995 AND b.yr = 1996)
-SELECT s_name AS supplier
-FROM both_years
-ORDER BY improvement DESC, s_suppkey
-LIMIT 5
-  ''',
-]
 
 [[levels]]
 name = "terse"

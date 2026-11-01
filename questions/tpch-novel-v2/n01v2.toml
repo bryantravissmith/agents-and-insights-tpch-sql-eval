@@ -1,7 +1,7 @@
 id = "n01v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of n01's terse rung, 2026-11-01. The terse brief asks how much order value, so the reference returns only year and order value; v1's reference also returned an order count the brief never asks for, which only agents that add a count matched. accepted_sql takes the year as text or as a year-start timestamp. Same trap: adding an order's total price once per matching line item, through a join that is not deduplicated to orders, double-counts order value (naive 1993 total 656.6M vs 600.8M)."
+note = "Version 2 of n01's terse rung, 2026-11-01. The terse brief asks how much order value, so the reference returns only year and order value; v1's reference also returned an order count the brief never asks for, which only agents that add a count matched. accepted_sql takes the year as text or as a year-start timestamp. Same trap: adding an order's total price once per matching line item, through a join that is not deduplicated to orders, double-counts order value (naive 1993 total 656.6M vs 600.8M). Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 SELECT year(o_orderdate) AS order_year, sum(o_totalprice) AS order_value
 FROM orders

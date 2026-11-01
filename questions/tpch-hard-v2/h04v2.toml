@@ -1,13 +1,13 @@
 id = "h04v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of h04's terse rung, 2026-11-01. 'Order size' is not defined: v1's reference used net line revenue, while 121 of 125 agents' terse runs used the order's total price, and all of them failed. v2 accepts both and returns region and the percentile; v1 also returned an order count the brief does not ask for. Same traps: the exclusive (PERCENTILE.EXC) method, which no DuckDB built-in computes, and leaving out the whole order when any item was returned."
+note = "Version 2 of h04's terse rung, 2026-11-01: returns region and the percentile, which is what the terse brief asks; v1 also returned an order count. Intended: order size is the order's net line revenue (price after discount summed over its items), by the customer's region, orders placed in 1994 with no returned item at all, using the exclusive (PERCENTILE.EXC) method. 121 of 125 terse runs used the order's total price, a reasonable reading of 'order size' that this rubric grades wrong. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 WITH ord AS (
   SELECT o_orderkey, o_custkey, sum(l_extendedprice * (1 - l_discount)) AS size
   FROM orders JOIN lineitem ON l_orderkey = o_orderkey
   WHERE o_orderdate >= DATE '1994-01-01' AND o_orderdate < DATE '1995-01-01'
-  GROUP BY o_orderkey, o_custkey, o_totalprice
+  GROUP BY o_orderkey, o_custkey
   HAVING count(*) FILTER (WHERE l_returnflag = 'R') = 0),
 x AS (
   SELECT r_name, size::DOUBLE AS size,
@@ -22,29 +22,6 @@ JOIN x lo ON lo.r_name = h.r_name AND lo.pos = floor(h.h)
 JOIN x hi ON hi.r_name = h.r_name AND hi.pos = floor(h.h) + 1
 ORDER BY region
 '''
-# The same with order size as the order's total price.
-accepted_sql = [
-  '''
-WITH ord AS (
-  SELECT o_orderkey, o_custkey, o_totalprice AS size
-  FROM orders JOIN lineitem ON l_orderkey = o_orderkey
-  WHERE o_orderdate >= DATE '1994-01-01' AND o_orderdate < DATE '1995-01-01'
-  GROUP BY o_orderkey, o_custkey, o_totalprice
-  HAVING count(*) FILTER (WHERE l_returnflag = 'R') = 0),
-x AS (
-  SELECT r_name, size::DOUBLE AS size,
-         row_number() OVER (PARTITION BY r_name ORDER BY size) AS pos,
-         count(*) OVER (PARTITION BY r_name) AS n
-  FROM ord JOIN customer ON c_custkey = o_custkey
-  JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey),
-h AS (SELECT DISTINCT r_name, n, 0.9 * (n + 1) AS h FROM x)
-SELECT h.r_name AS region, lo.size + (h.h - floor(h.h)) * (hi.size - lo.size) AS p90_order_size
-FROM h
-JOIN x lo ON lo.r_name = h.r_name AND lo.pos = floor(h.h)
-JOIN x hi ON hi.r_name = h.r_name AND hi.pos = floor(h.h) + 1
-ORDER BY region
-  ''',
-]
 
 [[levels]]
 name = "terse"

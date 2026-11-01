@@ -131,7 +131,11 @@ def markdown(rep: dict) -> str:
     out = [
         "# Accuracy",
         "",
-        "Strict correct (lenient in parentheses) over graded runs; n is graded runs per cell.",
+        (
+            "Correct over graded runs: every column the reference asks for, with the right values; extra columns"
+            " pass and are noted in the verdicts. In parentheses, lenient: also right answers that were never"
+            " submitted. n is graded runs per cell."
+        ),
         "",
     ]
     for s in rep["sets"] + ["all"]:
@@ -160,7 +164,7 @@ def markdown(rep: dict) -> str:
         ),
         "",
         (
-            "| agent | strict | queries | wall s | tokens in | cache read | cache write | tokens out | cost/run "
+            "| agent | correct | queries | wall s | tokens in | cache read | cache write | tokens out | cost/run "
             "| cost/correct | tokens/correct |"
         ),
         "|---" * 11 + "|",

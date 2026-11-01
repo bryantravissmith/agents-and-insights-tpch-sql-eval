@@ -23,14 +23,17 @@ def _row(agent, task, level, verdict, repeat=1, source="submit"):
     }
 
 
-def test_rules_widen_in_order_and_need_a_submitted_answer():
+def test_correct_allows_extra_columns_and_the_notes_bracket_it():
     extra, missing = _row("a", "q", "terse", "extra_columns"), _row("a", "q", "terse", "missing_columns")
-    assert [findings.passes(extra, rule) for rule in findings.RULES] == [False, True, True]
+    assert list(findings.RULES) == ["correct", "exact columns", "values only"]
+    assert [findings.passes(extra, rule) for rule in findings.RULES] == [True, False, True]
     assert [findings.passes(missing, rule) for rule in findings.RULES] == [False, False, True]
-    assert findings.passes(_row("a", "q", "terse", "exact"), "strict")
-    assert not findings.passes(_row("a", "q", "terse", "missing_columns", source="last_query"), "as-asked")
+    assert findings.passes(_row("a", "q", "terse", "exact"))  # correct is the default rule
+    # The verdict decides, not a stored `correct` that may predate the rule; only a submitted query passes.
+    assert findings.passes(_row("a", "q", "terse", "extra_columns") | {"correct": 0})
+    assert not findings.passes(_row("a", "q", "terse", "exact", source="last_query"))
     rows = [extra, missing, _row("a", "q", "terse", "harness_error")]  # a provider failure is not graded
-    assert findings.tally(rows, "as-asked")[("a", "q", "terse")] == (2, 2)
+    assert findings.tally(rows, "values only")[("a", "q", "terse")] == (2, 2)
 
 
 def test_gap_interval_resamples_questions_and_shows_one_question_carrying_it():
@@ -106,10 +109,11 @@ def test_run_findings_writes_deterministic_files(tmp_path):
     out = tmp_path / "out"
     f = findings.run_findings(["b"], out, audit_runs=audit, results=results, questions=qdir, root=tmp_path)
     assert f["partial"] == {}
-    strict, asked = (f["terse_rules"]["tpch-novel"][r]["gaps"]["pi:a"] for r in ("strict", "as-asked"))
-    assert strict["gap"] == 1.0 and asked["gap"] == 0.0  # the whole gap is left-out columns
+    correct, close = (f["terse_rules"]["tpch-novel"][r]["gaps"]["pi:a"] for r in ("correct", "values only"))
+    assert correct["gap"] == 1.0 and close["gap"] == 0.0  # the whole gap is left-out columns
+    assert f["asks"][("pi:a", "terse")]["runs"] == 8 and f["asks"][("pi:a", "terse")]["instead"] == 0
     md = (out / "findings.md").read_text()
-    assert "## 2. TPC-H minus novel" in md and "### tpch-novel, as-asked" in md
+    assert "## 2. TPC-H minus novel" in md and "## 8. The terse rung tests ambiguity" in md
     assert "n1 - pi:a" in (out / "terse-misses.md").read_text()
     before = {p.name: p.read_text() for p in out.iterdir()}
     findings.run_findings(["b"], out, audit_runs=audit, results=results, questions=qdir, root=tmp_path)

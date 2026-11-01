@@ -2,6 +2,7 @@
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -68,26 +69,30 @@ def test_novel_v2_keeps_v1s_prompts_and_answers_and_drops_only_unasked_columns()
         assert verdict == {"n01v2": "extra_columns", "n03v2": "extra_columns", "n06v2": "extra_columns"}.get(
             qid, "exact"
         ), qid
-    inclusive, exclusive = (grading.expected_result(r, v2["n06v2"].db).rows for r in v2["n06v2"].references)
-    assert [(a[0], b[0]) for a, b in zip(inclusive, exclusive) if a != b] == [("HOUSEHOLD", "HOUSEHOLD")]
+    # Alternatives are other forms of the same answer, never other definitions: only n01 (the year) and n04
+    # (the month) have them, and every alternative has the target's row count.
+    assert sorted(q for q, t in v2.items() if t.accepted_sql) == ["n01v2", "n04v2"]
+    for t in (v2["n01v2"], v2["n04v2"]):
+        n = len(grading.expected_result(t.target_sql, t.db).rows)
+        assert all(len(grading.expected_result(a, t.db).rows) == n for a in t.accepted_sql)
 
 
 @pytest.mark.skipif(not (HERE / "tpch.duckdb").exists(), reason="needs tpch.duckdb (uv run setup_db.py)")
-def test_hard_v2_keeps_v1s_prompts_and_every_alternative_is_a_different_answer():
+def test_hard_v2_keeps_v1s_prompts_and_definitions_and_drops_only_unasked_columns():
     v1 = {t.id: t for t in load_questions(HERE / "questions" / "tpch-hard", levels=["terse"])}
     v2 = {t.id: t for t in load_questions(HERE / "questions" / "tpch-hard-v2")}
     assert sorted(v2) == [f"{q}v2" for q in sorted(v1)]
     for qid, t in v2.items():
         old = v1[qid[:3]]
         assert t.prompt_sha == old.prompt_sha, qid
-        # v1's answer still passes, with its unasked columns as extras.
-        assert grading.grade_any(old.target_sql, t.target_sql, t.accepted_sql, t.db)[0].verdict in (
-            "exact",
-            "extra_columns",
+        # The intended definitions are the rubric: no alternative definitions, and v1's answer still passes,
+        # with the columns the terse brief never asked for as extras.
+        assert t.accepted_sql == (), qid
+        assert grading.grade_sql(old.target_sql, t.target_sql, t.db).verdict in ("exact", "extra_columns"), qid
+        assert (
+            "graded by design"
+            in tomllib.loads((HERE / "questions" / "tpch-hard-v2" / f"{qid}.toml").read_text())["note"]
         ), qid
-        # An alternative that gives the target's rows is dead weight: value grading already accepts it.
-        target = grading.expected_result(t.target_sql, t.db).rows
-        assert all(grading.expected_result(a, t.db).rows != target for a in t.accepted_sql), qid
 
 
 def test_regrade_matches_runs_by_prompt_and_keeps_the_original(tmp_path, synthetic_db):

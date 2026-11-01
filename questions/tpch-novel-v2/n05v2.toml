@@ -1,7 +1,7 @@
 id = "n05v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of n05's terse rung, 2026-11-01: unchanged from v1 (its reference returns only what the terse brief asks), kept so the v2 set has all six questions. Trap: the average must include customers with zero 1995 orders (a third of customers never order). Averaging over customers who ordered gives about 2.64 instead of about 1.50."
+note = "Version 2 of n05's terse rung, 2026-11-01: unchanged from v1 (its reference returns only what the terse brief asks), kept so the v2 set has all six questions. Trap: the average must include customers with zero 1995 orders (a third of customers never order). Averaging over customers who ordered gives about 2.64 instead of about 1.50. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 SELECT c_mktsegment AS segment,
        count(o_orderkey) / count(DISTINCT c_custkey) AS avg_orders_per_customer

@@ -38,20 +38,20 @@ uv run evals.py regrade <batch> [...] --questions questions/tpch-novel-v2 --name
 uv run evals.py style <batch> [<batch> ...] --out style/        # SQL style and dialect stumbles by maker and set
 ```
 
-`report` reads every current run of the batches and prints strict (and lenient) accuracy by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
+`report` reads every current run of the batches and prints accuracy (and lenient, which also counts right answers that were never submitted) by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
 
 `audit` reads the same runs for two things a score does not show, and writes the evidence for review: `summary.md` (rates by agent and question set), `flagged.md` (every flagged run with the SQL or message that triggered it), `runs.jsonl` (every signal for every run) and `markers.json` (what counts as recall for each question and level). The rules are in `evalkit/audit.py`.
 
 - **Cheating attempts**, from every `run_sql` call in `queries.log`, refused ones included: reaching for the answer key (DuckDB's `tpch_queries()`, `tpch_answers()`, `PRAGMA tpch`, `dbgen`), reading files or attaching databases, probing the engine (`duckdb_extensions()`, `SET`, `INSTALL`), and tool calls the CLI denied. A `got through` column counts attempts that ran.
 - **Prior exposure**: naming TPC-H or the specific query in the final message (or asking the engine for it by number), reproducing details of the reference query that the brief at that level leaves out and the data does not reveal (TPC-H's output names such as `numwait` and `custdist`, constants such as q22's country codes or q21's `LIMIT 100`), and submitting SQL in the published queries' 1990s comma-join style (`FROM lineitem, orders WHERE ...`, used by 17 of the 22 references). The novel and hard questions, written after the models were trained, run through the same detectors as the control.
 
-`findings` turns the batches into claims, each with a 95% interval from resampling questions (ten repeats of one question are not independent, and a set of six questions is a small sample): the spec-brief ceiling, the TPC-H minus novel gap at each level under three grading rules (strict; lenient, which also accepts extra columns; as-asked, which also accepts answers that left out reference columns), whether runs that reproduce the reference score more often within a question, per-question terse tables, how misses fail, how often repeats disagree, and cost per correct answer. It also writes `terse-misses.md`, a fixed sample of terse misses to read by hand. The rules are in `evalkit/findings.py`.
+`findings` turns the batches into claims, each with a 95% interval from resampling questions (ten repeats of one question are not independent, and a set of six questions is a small sample): the spec-brief ceiling, the TPC-H minus novel gap at each level (as correct, with two notes: `exact columns`, nothing beyond the reference's columns, and `values only`, right values with some reference columns missing), whether runs that reproduce the reference score more often within a question, per-question terse tables, how misses fail, how often repeats disagree, cost per correct answer, and how often agents asked for clarification instead of assuming. It also writes `terse-misses.md`, a fixed sample of terse misses to read by hand. The rules are in `evalkit/findings.py`.
 
 `style` describes how each model family writes SQL and how often DuckDB rejects it, every table sliced by question set (TPC-H, novel, hard): queries, schema lookups and failed queries per run, DuckDB's error types, calls to functions DuckDB does not have, the share of submitted queries using each construct (comma joins, CTEs, window functions, `QUALIFY`, `EXTRACT` versus `year()`, `GROUP BY 1`, `NULLIF`, `ROUND` and more) and query length. A construct common on TPC-H and absent from the other sets is the benchmark's style, not the model's. The rules are in `evalkit/style.py`.
 
 `regrade` grades saved runs against new versions of their questions, matched by level and prompt hash, without running an agent: the reference is never shown to the agent, so a version that changes only the reference leaves every run as it was. It writes `results/regrade-<name>/`; each run keeps its prompt, graded SQL, query log and final message, and records the original grade and run. See `questions/README.md` for why the novel set has a v2.
 
-`experiments/full-grid-2026-10-31.sh` runs `reparse`, `report`, `audit`, `style`, the novel v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
+`experiments/full-grid-2026-10-31.sh` runs `reparse`, `rescore`, `report`, `audit`, `style`, the novel and hard v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
 
 From Python (a notebook, a script):
 
@@ -113,7 +113,9 @@ Add levels freely (`misleading`, `with-schema-hint`). A level may carry its own 
 
 The grader executes the target SQL and the agent's SQL read-only on the same database (candidate SQL also passes the tool blocklist) and compares by column position, never by name. Integers and DECIMAL values retain their exact values; floating-point comparisons use 1e-12 relative tolerance for aggregation noise. A candidate with lower decimal precision can match a rounded target: `ROUND(x, 2)` gets at most +-0.005. Rounding allowances do not apply when both exact values have the same precision. This rejects incorrect large totals that the former 1e-6 relative tolerance accepted.
 
-A question may list `accepted_sql` alternatives, other representations of the same answer; the grader takes the first reference it matches and records which one (see `questions/README.md`). **A strict grade is agreement with the reference's author.** On a terse brief that does not say which columns to return or in what form, the strict verdict mostly measures whether the agent shares the author's conventions; compare the lenient rate, and read a few misses, before ranking agents on it.
+**What counts as correct.** Every column the reference asks for, with the right values. Extra columns, column order, row order and the form of a value (through `accepted_sql`, other representations of the same answer) do not change the answer, so they pass. The verdict and `reference` in `result.json` note them. On a terse brief, the question's intended definition is the rubric: a reasonable assumption that differs is graded wrong, by design (see `questions/README.md`, "How the terse rung is graded").
+
+Until 2026-11-01, extra columns were not correct. `uv run evals.py rescore <batch>` recomputes `correct` from the recorded verdicts under the current rule, with no agent run again. It keeps each changed run's earlier score in `rescored` and logs the change in the manifest.
 
 These verdicts measure result equivalence, not every instruction in a prompt. A prompt that forbids rounding or requires a particular row/column order needs a separate strict audit; `exact_unordered` and `columns_reordered` still count as equivalent results.
 
@@ -122,13 +124,13 @@ These verdicts measure result equivalence, not every instruction in a prompt. A 
 | `exact` | same rows, same order | yes |
 | `exact_unordered` | same rows, different order | yes |
 | `columns_reordered` | same rows once columns are permuted | yes |
-| `extra_columns` | all target columns present, plus others | no, lenient yes |
+| `extra_columns` | all target columns present, plus others | yes (noted; before 2026-11-01, no) |
 | `missing_columns` | every column it returned lines up, but some target columns are absent | no |
 | `rows_differ` / `values_differ` / `columns_differ` | wrong answer | no |
 | `sql_error` | candidate fails or is refused | no |
 | `no_sql` / `timeout` / `harness_error` | nothing to grade | no |
 
-**Only SQL passed to `submit_sql` can be correct.** If the agent never submits, the grader still grades the last ```` ```sql ```` block of its final message, or else its last successful `run_sql`. The result is marked `[not submitted; graded …]` for diagnosis, and only the `lenient` column can credit it.
+**Only SQL passed to `submit_sql` can be correct.** If the agent never submits, the grader still grades the last ```` ```sql ```` block of its final message, or else its last successful `run_sql`. The result is marked `[not submitted; graded …]` for diagnosis, and only the `lenient` column (right answer, wherever the SQL came from) can credit it.
 
 Summary cells read `k/n`, with `(+m)` when m more runs had the right rows but added columns or never submitted. A level whose prompt text changed between batches is split by prompt hash (`spec@ee42397`), never pooled.
 

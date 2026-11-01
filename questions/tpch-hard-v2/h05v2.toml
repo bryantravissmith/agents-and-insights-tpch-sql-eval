@@ -1,7 +1,7 @@
 id = "h05v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of h05's terse rung, 2026-11-01. 'Year over year, 1993 to 1998' does not say that 1993 is compared with 1992, so a blank change for 1993 is accepted beside the target; the stakeholder rung asks for the 1992 comparison and keeps it. Same trap: the data ends 1998-08-02, so every year uses the January 1 to August 2 window and the agent finds the last order date itself."
+note = "Version 2 of h05's terse rung, 2026-11-01: unchanged from v1, whose reference returns what the terse brief asks (active customers and the change, by region and year). Intended: the data ends 1998-08-02, so every year uses the January 1 to August 2 window, and 1993's change is measured against the 1992 window. Leaving 1993's change blank is a reasonable reading of '1993 to 1998' that this rubric grades wrong. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 WITH a AS (
   SELECT r_name, year(o_orderdate) AS yr, count(DISTINCT o_custkey) AS active
@@ -15,23 +15,6 @@ FROM a
 QUALIFY yr >= 1993
 ORDER BY region, year
 '''
-# The same with 1993's change left blank.
-accepted_sql = [
-  '''
-WITH a AS (
-  SELECT r_name, year(o_orderdate) AS yr, count(DISTINCT o_custkey) AS active
-  FROM orders JOIN customer ON c_custkey = o_custkey
-  JOIN nation ON n_nationkey = c_nationkey JOIN region ON r_regionkey = n_regionkey
-  WHERE (month(o_orderdate) < 8 OR (month(o_orderdate) = 8 AND day(o_orderdate) <= 2))
-    AND year(o_orderdate) >= 1993
-  GROUP BY r_name, yr)
-SELECT r_name AS region, yr AS year, active,
-       active - lag(active) OVER (PARTITION BY r_name ORDER BY yr) AS change
-FROM a
-QUALIFY yr >= 1993
-ORDER BY region, year
-  ''',
-]
 
 [[levels]]
 name = "terse"

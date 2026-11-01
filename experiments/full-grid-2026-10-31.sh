@@ -20,6 +20,9 @@ mkdir -p "$OUT"
 # Usage and cost fields come from each run's saved transcript with the current parsers (verdicts untouched).
 for b in "${BATCHES[@]}"; do uv run evals.py reparse "$b"; done
 
+# Scores under the current rule (extra columns are correct, and noted); each run keeps its previous score.
+for b in "${BATCHES[@]}"; do uv run evals.py rescore "$b"; done
+
 # Accuracy and efficiency, with every cost labeled by its basis.
 uv run evals.py report "${BATCHES[@]}" --csv "$OUT/report.csv" > "$OUT/report.md"
 

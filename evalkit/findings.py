@@ -14,25 +14,26 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from .grading import CORRECT, EXACT_COLUMNS
 from .report import LEVELS, cell, load_rows, question_sets
 
 SEED, DRAWS = 20261031, 2000
 SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard", "tpch-hard-v2"]
 
-# Three grading rules, from the grader's verdicts (see evalkit/grading.py):
-#   strict    the grader's `correct`: the reference's columns and rows
-#   lenient   also the right rows with columns nobody asked for
-#   as-asked  also every returned column right but some reference columns left out. A terse brief often asks
-#             for one number while the reference also returns a count or a denominator; this rule accepts the
-#             answer to the question as asked. It is an upper bound: a run that returned only the grouping
-#             column would pass too.
+# Grading rules, from each run's verdict (see evalkit/grading.py); a run passes only with a submitted query.
+#   correct        the headline: every column the reference asks for, with the right values. Extra columns,
+#                  column order and row order do not change the answer, so they pass (and are noted).
+#   exact columns  a note, not a score: correct with nothing beyond the reference's columns.
+#   values only    a note, not a score: every returned column right, but some of the reference's columns
+#                  missing. Not correct (part of the answer is absent); it shows how many runs were close.
 RULES = {
-    "strict": None,
-    "lenient": frozenset({"extra_columns"}),
-    "as-asked": frozenset({"extra_columns", "missing_columns"}),
+    "correct": CORRECT,
+    "exact columns": EXACT_COLUMNS,
+    "values only": CORRECT | {"missing_columns"},
 }
 
 
@@ -40,14 +41,11 @@ def _key(r: dict) -> tuple:
     return r["agent"], r["task"], r["level"]
 
 
-def passes(r: dict, rule: str = "strict") -> bool:
-    if int(r.get("correct") or 0):
-        return True
-    extra = RULES[rule]
-    return bool(extra) and r.get("verdict") in extra and r.get("sql_source") == "submit"
+def passes(r: dict, rule: str = "correct") -> bool:
+    return r.get("verdict") in RULES[rule] and r.get("sql_source") == "submit"
 
 
-def tally(rows: list[dict], rule: str = "strict") -> dict[tuple, tuple[int, int]]:
+def tally(rows: list[dict], rule: str = "correct") -> dict[tuple, tuple[int, int]]:
     """(agent, task, level) -> (passing, graded)."""
     out: dict[tuple, list[int]] = defaultdict(lambda: [0, 0])
     for r in rows:
@@ -205,6 +203,28 @@ def failure_modes(rows: list[dict], sets: dict[str, str]) -> dict:
     return out
 
 
+_ASKS = re.compile(
+    r"could you (?:please )?(?:clarify|confirm|specify|tell me)|can you (?:clarify|confirm|specify)|"
+    r"please (?:clarify|confirm|specify|let me know which)|which (?:one|definition|do you mean|would you like)|"
+    r"do you (?:mean|want)|should i (?:use|assume)|before i (?:proceed|answer)|need (?:more )?clarification",
+    re.IGNORECASE,
+)
+
+
+def clarifications(rows: list[dict], root: Path) -> dict[tuple, Counter]:
+    """(maker, level) -> runs, runs that asked instead of submitting, runs that asked and submitted anyway."""
+    out: dict[tuple, Counter] = defaultdict(Counter)
+    for r in rows:
+        if r.get("verdict") == "harness_error" or "regraded_from" in r:
+            continue
+        cell = out[(maker(r["agent"]), r["level"])]
+        cell["runs"] += 1
+        final = root / r["run_dir"] / "final_message.txt"
+        if final.exists() and _ASKS.search(final.read_text(errors="replace")):
+            cell["and_submitted" if r.get("sql_source") == "submit" else "instead"] += 1
+    return dict(out)
+
+
 MAKERS = (("claude:", "Anthropic"), ("pi:gpt", "OpenAI"), ("pi:grok", "xAI"), ("agy:", "Google"))
 
 
@@ -252,7 +272,9 @@ def samples_markdown(rows: list[dict], sets: dict[str, str], root: Path, per_age
         "# Terse misses to read by hand",
         "",
         "One miss per agent per question set at the terse level, chosen by a hash of the run directory.",
-        "For each: was the answer a reasonable reading of the brief (the grader is too strict), or wrong?",
+        "For each, one of three: a reasonable assumption that differs from the intended definition (wrong by",
+        "design: the terse rung tests ambiguity); the right answer in a form the grader should accept (fix the",
+        "key with accepted_sql); or an error.",
         "",
     ]
     for s in sorted({sets.get(r["task"], "other") for r in rows}):
@@ -262,7 +284,7 @@ def samples_markdown(rows: list[dict], sets: dict[str, str], root: Path, per_age
             if r["level"] == "terse"
             and sets.get(r["task"]) == s
             and r.get("verdict") != "harness_error"
-            and not int(r.get("correct") or 0)
+            and not passes(r)
         ]
         out += [f"## {s}", ""]
         for r in _pick(misses, per_agent):
@@ -305,7 +327,14 @@ def _iv(ci, fmt=_pct) -> str:
     return "-" if ci is None else f"{fmt(ci[0])} to {fmt(ci[1])}"
 
 
-def build(batches: list[str], audit_runs: Path, *, results: Path | None = None, questions: Path | None = None):
+def build(
+    batches: list[str],
+    audit_runs: Path,
+    *,
+    results: Path | None = None,
+    questions: Path | None = None,
+    root: Path | None = None,
+):
     rows = load_rows(batches, results)
     sets = question_sets(questions)
     audit = {}
@@ -335,7 +364,6 @@ def build(batches: list[str], audit_runs: Path, *, results: Path | None = None, 
             for s in novel
         },
         "versions": version_shift(rows),
-        "tally_as_asked": by_rule["as-asked"],
         "rows": rows,
         "sets": sets,
         "by_set": dict(by_set),
@@ -350,6 +378,7 @@ def build(batches: list[str], audit_runs: Path, *, results: Path | None = None, 
         "failures": failure_modes(rows, sets),
         # A re-graded run is a second grade of a run already counted, not a second run to pay for.
         "cost": {a: cell([r for r in rows if r["agent"] == a and "regraded_from" not in r]) for a in agents},
+        "asks": clarifications(rows, root or (results.parent if results else Path(__file__).resolve().parent.parent)),
         "tally": t,
     }
 
@@ -393,19 +422,21 @@ def markdown(f: dict) -> str:
         ),
         "",
         (
-            "Caveat on the novel set: its questions and reference SQL were drafted by Claude Opus 5.5 (in Claude"
-            " Code, then checked by hand), so its references carry one model family's habits, such as returning a"
-            " count or a denominator beside the number a terse brief asks for. 2a shows how much of the gap that"
-            " explains."
+            "Caveat on the novel and hard sets: their questions and reference SQL were drafted by Claude Opus 5.5"
+            " (in Claude Code, then checked by hand). The v1 terse references carry that model's habits: columns"
+            " the brief never asks for (a count, a denominator), and one form of a value (a month as 'YYYY-MM')."
+            " The v2 sets (`tpch-novel-v2`, `tpch-hard-v2`) re-grade the same terse runs against references that"
+            " return only what each brief asks, and accept the same value in other forms. Their definitions are"
+            " unchanged: on a terse brief the definition is left open on purpose, and the intended one is the"
+            " rubric, so a reasonable assumption that differs is graded wrong (see section 8)."
         ),
         "",
-        "### 2a. Terse briefs under three grading rules",
+        "### 2a. Terse briefs: correct, with two notes",
         "",
         (
-            "strict is the grader's correct; lenient also accepts extra columns; as-asked also accepts answers that"
-            " left out reference columns but got every column they returned right (an upper bound; see `RULES`)."
-            " `tpch-novel-v2` re-grades the same novel terse runs against references that return only what the"
-            " brief asks (see section 2c)."
+            "`correct` is the score: every column the reference asks for, with the right values; extra columns"
+            " pass. `exact columns` (nothing beyond the reference's columns) and `values only` (every returned"
+            " column right, some reference columns missing) are notes, not scores; see `RULES`."
         ),
         "",
     ]
@@ -438,9 +469,9 @@ def markdown(f: dict) -> str:
             "",
             (
                 "Every row is the same saved terse runs graded twice: by the original reference (v1) and by a"
-                " version that returns only what the brief asks (v2), with accepted alternatives where a correct"
-                " answer has more than one form. Passing runs out of runs, by the maker of the agent's model."
-                " The v1 references were drafted by an Anthropic model."
+                " version that returns only what the brief asks (v2), with accepted alternatives where the same"
+                " answer has more than one form. The definitions are the same in both. Passing runs out of runs,"
+                " by the maker of the agent's model. The v1 references were drafted by an Anthropic model."
             ),
             "",
             "| question | maker | runs | "
@@ -461,7 +492,7 @@ def markdown(f: dict) -> str:
         out.append("")
     out += [
         "",
-        "### 2b. Every level, strict",
+        "### 2b. Every level, correct",
         "",
         "| agent | level | TPC-H | novel | gap | interval | range |",
         "|---|---|---|---|---|---|---|",
@@ -519,20 +550,17 @@ def markdown(f: dict) -> str:
         "## 4. Per question, terse briefs",
         "",
         (
-            "Strict correct out of graded runs. A column of zeros is a question whose terse brief no agent reads the"
-            " way the reference does; a column split by agent is where the agents differ. The last table repeats the"
-            " novel set under the as-asked rule."
+            "Correct out of graded runs. A column of zeros is a question whose terse brief no agent reads the way"
+            " the intended definition does; a column split by agent is where the agents differ."
         ),
         "",
     ]
-    tables = [(s, tasks, f["tally"], "strict") for s, tasks in by_set.items()]
-    if "tpch-novel" in by_set:
-        tables.append(("tpch-novel", by_set["tpch-novel"], f["tally_as_asked"], "as-asked"))
-    for s, tasks, tal, rule in tables:
-        out += [f"### {s}, {rule}", "", "| agent | " + " | ".join(tasks) + " |", "|---" * (len(tasks) + 1) + "|"]
+    for s, tasks in by_set.items():
+        out += [f"### {s}", "", "| agent | " + " | ".join(tasks) + " |", "|---" * (len(tasks) + 1) + "|"]
         for a in agents:
             cells = [
-                f"{k}/{n}" if (k, n) != (0, 0) else "-" for k, n in (tal.get((a, q, "terse"), (0, 0)) for q in tasks)
+                f"{k}/{n}" if (k, n) != (0, 0) else "-"
+                for k, n in (f["tally"].get((a, q, "terse"), (0, 0)) for q in tasks)
             ]
             out.append(f"| {name(a)} | " + " | ".join(cells) + " |")
         out.append("")
@@ -573,7 +601,7 @@ def markdown(f: dict) -> str:
             " the tokens processed that were cache reads or writes."
         ),
         "",
-        "| agent | strict | cost/correct | tokens/correct | cache share |",
+        "| agent | correct | cost/correct | tokens/correct | cache share |",
         "|---|---|---|---|---|",
     ]
     for a in sorted(agents, key=lambda a: f["cost"][a]["cost_per_correct"] or 0):
@@ -583,6 +611,23 @@ def markdown(f: dict) -> str:
         cpc = "-" if c["cost_per_correct"] is None else f"${c['cost_per_correct']:.4f}"
         tpc = "-" if c["tokens_per_correct"] is None else f"{c['tokens_per_correct']:,.0f}"
         out.append(f"| {name(a)} | {_pct(c['strict'])} | {cpc} | {tpc} | {_pct(share)} |")
+    out += [
+        "",
+        "## 8. The terse rung tests ambiguity: did anyone ask?",
+        "",
+        (
+            "A terse brief leaves definitions open on purpose. The intended definition is the rubric, so an agent"
+            " that silently assumes another reasonable one is graded wrong; asking is the move the rung rewards in"
+            " principle. A run is headless, though: nobody answers, and the shared preamble tells the agent to"
+            " submit and state its assumptions. `asked instead` ended with a question and no submitted query;"
+            " `asked and submitted` asked a question but submitted anyway. Matched by phrases (`_ASKS`)."
+        ),
+        "",
+        "| maker | level | runs | asked instead | asked and submitted |",
+        "|---|---|---|---|---|",
+    ]
+    for (m, lv), c in sorted(f["asks"].items(), key=lambda kv: (kv[0][0], LEVELS.index(kv[0][1]))):
+        out.append(f"| {m} | {lv} | {c['runs']} | {c['instead']} | {c['and_submitted']} |")
     return "\n".join(out) + "\n"
 
 
@@ -602,6 +647,7 @@ def _jsonable(f: dict) -> dict:
             "|".join(k): {"runs": v["runs"], "old": dict(v["old"]), "new": dict(v["new"])}
             for k, v in f["versions"].items()
         },
+        "asks": {"|".join(k): dict(v) for k, v in f["asks"].items()},
         "recall": f["recall"],
         "repeats": keys(f["repeats"]),
         "failures": keys(f["failures"]),
@@ -619,10 +665,10 @@ def run_findings(
     root: Path | None = None,
 ) -> dict:
     """Write findings.md, findings.json and terse-misses.md to out_dir."""
-    f = build(batches, audit_runs, results=results, questions=questions)
+    root = root or (results.parent if results else Path(__file__).resolve().parent.parent)
+    f = build(batches, audit_runs, results=results, questions=questions, root=root)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "findings.md").write_text(markdown(f))
     (out_dir / "findings.json").write_text(json.dumps(_jsonable(f), indent=1, sort_keys=True) + "\n")
-    root = root or (results.parent if results else Path(__file__).resolve().parent.parent)
     (out_dir / "terse-misses.md").write_text(samples_markdown(f["rows"], f["sets"], root))
     return f

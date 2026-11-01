@@ -1,7 +1,7 @@
 id = "n06v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of n06's terse rung, 2026-11-01. The terse brief asks how many came back, so the reference returns segment and that count only; v1 also returned the cohort size, which only agents that add a denominator matched. 'Within 90 days' accepts both an inclusive and an exclusive 90th day (they differ by one customer in HOUSEHOLD). Same traps: 'started with us in 1994' means the first ever order is in 1994, not the first order in 1994; the window is per customer and starts after the first order date."
+note = "Version 2 of n06's terse rung, 2026-11-01. The terse brief asks how many came back, so the reference returns segment and that count only; v1 also returned the cohort size, which only agents that add a denominator matched. Intended: 'started with us in 1994' means the first ever order is in 1994, not the first order placed in 1994; 'came back within 90 days' means another order after the first order's date and no more than 90 days after it, day 90 included. Excluding day 90 is a reasonable reading that this rubric grades wrong (it changes HOUSEHOLD from 12 to 11). Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 WITH firsts AS (
   SELECT o_custkey, min(o_orderdate) AS first_date FROM orders GROUP BY o_custkey),
@@ -19,26 +19,6 @@ FROM cohort
 GROUP BY c_mktsegment
 ORDER BY c_mktsegment
 '''
-# The same with the 90th day excluded.
-accepted_sql = [
-  '''
-  WITH firsts AS (
-    SELECT o_custkey, min(o_orderdate) AS first_date FROM orders GROUP BY o_custkey),
-  cohort AS (
-    SELECT c_mktsegment, f.o_custkey, first_date
-    FROM firsts f JOIN customer ON c_custkey = f.o_custkey
-    WHERE first_date >= DATE '1994-01-01' AND first_date < DATE '1995-01-01')
-  SELECT c_mktsegment AS segment,
-         count(*) FILTER (WHERE EXISTS (
-           SELECT 1 FROM orders o
-           WHERE o.o_custkey = cohort.o_custkey
-             AND o.o_orderdate > cohort.first_date
-             AND o.o_orderdate < cohort.first_date + INTERVAL 90 DAY)) AS returned_within_90_days
-  FROM cohort
-  GROUP BY c_mktsegment
-  ORDER BY c_mktsegment
-  ''',
-]
 
 [[levels]]
 name = "terse"

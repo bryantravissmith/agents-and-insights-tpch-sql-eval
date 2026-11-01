@@ -1,7 +1,7 @@
 id = "h01v2"
 db = "../../tpch.duckdb"
 preamble_file = "../tpch/preamble.md"
-note = "Version 2 of h01's terse rung, 2026-11-01: unchanged from v1 (its reference returns what the terse brief asks and its misses are the stated trap), kept so the v2 set has all six questions. Gaps and islands over calendar months, then a distribution. Traps: treating orders up to 31 days apart as consecutive months, or using the month number without the year, both shift the distribution."
+note = "Version 2 of h01's terse rung, 2026-11-01: unchanged from v1, whose reference returns only what the terse brief asks; kept so the v2 set has all six questions. Intended: consecutive calendar months, crossing year boundaries, over customers who have ordered. Day gaps (30 or 31 days) instead of calendar months are wrong. Ambiguity, graded by design: the terse brief leaves this open on purpose, and the intended definition is the rubric. An agent that assumes another reasonable definition is graded wrong; the right move is to ask, or to state the assumption, and the final message's assumptions are kept for review, not graded."
 target_sql = '''
 WITH m AS (
   SELECT DISTINCT o_custkey, year(o_orderdate) * 12 + month(o_orderdate) AS mi FROM orders),
