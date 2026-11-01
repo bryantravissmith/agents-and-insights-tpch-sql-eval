@@ -10,10 +10,11 @@ Same two tools, same blocklist (sqlguard.py), same logging as extensions/duckdb-
                    with AUDIT_DECLARE=1 it also takes answer_columns, saved to answer_columns.json, and with
                    AUDIT_DECLARE_GRAIN=1 too, grain_columns (saved as {"answer": [...], "grain": [...]})
   ask_clarification(question)  only with AUDIT_ASK=1: always the same non-answer (ASK_REPLY); each call is logged
-                   as an ASK entry in queries.log and appended to $AUDIT_OUT/asks.jsonl
+                   as an ASK entry in queries.log and appended to $AUDIT_OUT/asks.jsonl. With AUDIT_ASK_STEPS (a
+                   JSON file listing briefs), the nth ask reveals the nth brief instead, then ASK_REPLY once they run out
 
 Env: AUDIT_DB (path to tpch.duckdb), AUDIT_OUT (run directory), AUDIT_DECLARE (1: declared answer columns),
-AUDIT_DECLARE_GRAIN (1: and the grain), AUDIT_ASK (1: offer ask_clarification).
+AUDIT_DECLARE_GRAIN (1: and the grain), AUDIT_ASK (1: offer ask_clarification), AUDIT_ASK_STEPS (--ask-step).
 Run: uv run mcp_server.py        (stdio transport; the CLIs launch it themselves)
 """
 
@@ -39,6 +40,9 @@ GRAIN = os.environ.get("AUDIT_DECLARE_GRAIN") == "1"
 # Batches run with allow_ask: the agent may ask a clarifying question. Nobody answers; the call is what we observe.
 ASK = os.environ.get("AUDIT_ASK") == "1"
 ASK_REPLY = "No clarification is available. Use your best judgement, and state your assumptions in your final message."
+# --ask-step batches: an ask at one level of the question reveals the next level's brief.
+STEPS = os.environ.get("AUDIT_ASK_STEPS")
+STEP_REPLY = "The person who made the request replied with more detail:"
 
 mcp = FastMCP("audit")
 
@@ -158,13 +162,23 @@ else:
         return _submit(sql, None)
 
 
+def _read(path: str) -> str:
+    with open(path) as f:
+        return f.read()
+
+
 def _ask(question: str) -> str:
     os.makedirs(OUT, exist_ok=True)
+    asks = os.path.join(OUT, "asks.jsonl")
+    n = len(_read(asks).splitlines()) if os.path.exists(asks) else 0  # the asks before this one
+    briefs = json.loads(_read(STEPS)) if STEPS else []
+    entry = {"at": datetime.now(UTC).isoformat(), "question": question}
+    entry |= {"revealed": n + 1} if n < len(briefs) else {}
     # One line in queries.log, so a question can never look like an entry's end (";") or another entry's header.
-    _log("ASK", " ".join(question.split()))
-    with open(os.path.join(OUT, "asks.jsonl"), "a") as f:
-        f.write(json.dumps({"at": datetime.now(UTC).isoformat(), "question": question}) + "\n")
-    return ASK_REPLY
+    _log("ASK", " ".join(question.split()), f"revealed={n + 1}" if "revealed" in entry else "")
+    with open(asks, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+    return f"{STEP_REPLY}\n\n{briefs[n]}" if "revealed" in entry else ASK_REPLY
 
 
 if ASK:

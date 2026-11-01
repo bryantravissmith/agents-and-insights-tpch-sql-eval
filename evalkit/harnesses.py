@@ -40,6 +40,8 @@ class RunContext:
     declare: bool = False  # submit_sql also takes answer_columns (see evalkit/declared.py)
     declare_grain: bool = False  # ... and grain_columns
     allow_ask: bool = False  # the agent also gets ask_clarification, which never answers
+    # --ask-step: a JSON list of the next briefs (kept in run_dir, not the agent's cwd); each ask reveals the next
+    ask_steps: Path | None = None
 
     @property
     def tools(self) -> tuple[str, ...]:
@@ -51,6 +53,7 @@ class RunContext:
         env = {"AUDIT_DB": str(self.db), "AUDIT_OUT": str(self.run_dir)}
         env |= {"AUDIT_DECLARE": "1"} if self.declare or self.declare_grain else {}
         env |= {"AUDIT_DECLARE_GRAIN": "1"} if self.declare_grain else {}
+        env |= {"AUDIT_ASK_STEPS": str(self.ask_steps)} if self.allow_ask and self.ask_steps else {}
         return env | ({"AUDIT_ASK": "1"} if self.allow_ask else {})
 
     def mcp_server(self) -> dict:

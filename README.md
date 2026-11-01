@@ -39,6 +39,7 @@ uv run evals.py regrade <batch> [...] --questions questions/tpch-novel-v2 --name
 uv run evals.py style <batch> [<batch> ...] --out style/        # SQL style and dialect stumbles by maker and set
 uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --declare-columns   # agents name their answer columns
 uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --allow-ask         # agents may ask; nobody answers
+uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna -l terse --ask-step # an ask reveals the next brief
 ```
 
 `report` reads every current run of the batches and prints accuracy (and lenient, which also counts right answers that were never submitted) by agent, question set and brief level, then efficiency per agent: queries, median wall time, tokens, cost per run, cost per correct answer and tokens per correct answer. Runs that failed on the provider's side (`harness_error`) are left out of every rate and counted in an `excluded` column; misses, timeouts and non-submissions stay in, so a model that spends and fails pays for it. Every cost is API-equivalent and labeled with its basis.
@@ -59,6 +60,8 @@ uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna --allow-ask        
 **Declared grain** (`run --declare-grain`, which implies `--declare-columns`): `submit_sql` also takes `grain_columns`, the columns that identify one row of the result (empty for a single-row answer). The grain must be unique in the agent's own result (else `grain_not_unique`), and only those columns may pair rows with the reference's labels; a different number of rows is `grain_differs`. Both are wrong answers that name the error, so grain mistakes, the classic analysis bug, can be counted apart from wrong values.
 
 **Asking for clarification** (`run --allow-ask`, combinable with the declare flags): the agent also gets `ask_clarification(question)`, and the prompt says it may ask when the request is ambiguous. The tool always replies "No clarification is available. Use your best judgement, and state your assumptions in your final message.", so asking changes nothing but what we can observe. Each call is an `ASK` entry in `queries.log` (not counted as a query) and a line in `asks.jsonl`; `result.json` records `asks` (the number of calls) and `ask_questions` (the first 10). `findings` counts a tool call as asking, alongside questions in the final message.
+
+**Asking that gets an answer** (`run --ask-step`): the same tool and the same prompt as `--allow-ask`, but the person who made the request replies with the question's next brief. An ask at the terse level reveals the stakeholder brief, a second ask the spec brief, and any further ask (or any ask at spec) gets the usual non-answer. The grading key doesn't change, so a terse run that asks can earn the information it needs. The briefs a run may reveal are written to its `ask_steps.json` (in the run directory, never the agent's working directory); `result.json` records `revealed`, the number of briefs its asks revealed, and each line of `asks.jsonl` records which one it got.
 
 `experiments/full-grid-2026-10-31.sh` runs `reparse`, `rescore`, `report`, `audit`, `style`, the novel and hard v2 `regrade` and `findings` over the 2026-10-31 batches in one go.
 
@@ -156,7 +159,8 @@ results/<batch>/                       batch = YYYYMMDD-HHMMSS[-name]
     ├── transcript.jsonl  stderr.log   the CLI's own output
     ├── queries.log                    every statement the agent ran, in order; read this before the answer
     ├── answer.sql                     what it submitted (the grader re-executes it)
-    ├── asks.jsonl                     its ask_clarification questions (--allow-ask runs that asked)
+    ├── asks.jsonl                     its ask_clarification questions (--allow-ask / --ask-step runs that asked)
+    ├── ask_steps.json                 the briefs its asks could reveal (--ask-step runs)
     ├── final_message.txt              its closing message (assumptions)
     └── result.json                    verdict, detail, tokens, cost
 results/scorecard.csv                  one row per run, every batch (local, gitignored)
@@ -172,7 +176,7 @@ With a shell and DuckDB, an agent could run `LOAD tpch; SELECT * FROM tpch_answe
 | --- | --- | --- |
 | `run_sql` | executes one read-only statement, returns up to 50 rows as CSV, appends to `queries.log` | more than one statement; any statement that does not start with `SELECT`, `WITH`, `FROM`, `VALUES`, `TABLE`, `SHOW`, `DESCRIBE`, `SUMMARIZE`, `EXPLAIN` or `PIVOT` (so `INSTALL`, `LOAD`, `ATTACH`, `COPY`, `SET`, every write); `tpch_*`, `dbgen`, `read_*()`, `query()` and file paths anywhere outside comments |
 | `submit_sql` | saves `answer.sql` and runs it to confirm it executes | same |
-| `ask_clarification` | only with `--allow-ask`: records the question, always replies that no clarification is available | runs no SQL |
+| `ask_clarification` | only with `--allow-ask` or `--ask-step`: records the question, replies that no clarification is available (`--ask-step`: with the question's next brief, while there is one) | runs no SQL |
 
 Since harness v2 the guard strips comments and blanks string literals before it looks at keywords, so `replace(...)`, `LIKE '%set%'`, a `;` inside a string or a trailing `-- call it done` comment are no longer refused. `extensions/duckdb-tools.ts` carries a copy of `sqlguard.py`; `tests/test_sqlguard.py` runs both on the same SQL.
 

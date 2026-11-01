@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -270,3 +271,110 @@ def test_pi_extension_compiles_and_registers_the_tool_only_with_the_env_var(tmp_
         (asked,) = [json.loads(line) for line in (run_dir / "asks.jsonl").read_text().splitlines()]
         assert asked["question"] == "Gross or net\nrevenue?" and asked["at"]
         assert runner._log_entries(run_dir) == [("ASK", "Gross or net revenue?")]
+
+
+# --ask-step: an ask reveals the question's next brief.
+
+STEP_HEAD = "The person who made the request replied with more detail:\n\n"
+
+
+def test_each_level_carries_the_briefs_above_it(tmp_path):
+    f = tmp_path / "x.toml"
+    f.write_text(
+        'id = "x"\ntarget_sql = "SELECT 1"\n'
+        '[[levels]]\nname = "terse"\nprompt = "T"\n'
+        '[[levels]]\nname = "stakeholder"\nprompt = "S"\n'
+        '[[levels]]\nname = "spec"\nprompt = "P"\n'
+        '[[levels]]\nname = "other"\nprompt = "O"\ntarget_sql = "SELECT 2"\n'  # another question: never revealed
+    )
+    assert {t.level: t.next_briefs for t in load_question(f)} == {
+        "terse": ("S", "P"),
+        "stakeholder": ("P",),
+        "spec": (),
+        "other": (),
+    }
+    # Filtering to one level keeps what it can reveal.
+    assert [t.next_briefs for t in load_question(f, ["terse"])] == [("S", "P")]
+    # The briefs an ask can reveal get the leak check too.
+    f.write_text(f.read_text().replace('prompt = "P"', 'prompt = "As in TPC-H"'))
+    with pytest.raises(ValueError, match="TPC-H"):
+        load_question(f, ["terse"])[0].check_leaks()
+
+
+def test_each_ask_reveals_the_next_brief_then_the_non_answer(tmp_path, monkeypatch):
+    import importlib
+
+    import mcp_server
+
+    steps = tmp_path / "ask_steps.json"
+    steps.write_text(json.dumps(["The stakeholder brief.", "The spec brief."]))
+    monkeypatch.setenv("AUDIT_ASK_STEPS", str(steps))
+    mod = _server(monkeypatch, tmp_path / "out", ask=True)
+    replies = [mod.ask_clarification(q) for q in ("Gross or net?", "Which year?", "Anything else?")]
+    assert replies == [STEP_HEAD + "The stakeholder brief.", STEP_HEAD + "The spec brief.", REPLY]
+    asks = [json.loads(line) for line in (tmp_path / "out" / "asks.jsonl").read_text().splitlines()]
+    assert [a.get("revealed") for a in asks] == [1, 2, None]
+    assert runner.asked(tmp_path / "out") == ["Gross or net?", "Which year?", "Anything else?"]
+    headers = [h for h in (tmp_path / "out" / "queries.log").read_text().splitlines() if h.startswith("-- ")]
+    assert [h.split(" ", 2)[2] for h in headers] == ["ASK revealed=1", "ASK revealed=2", "ASK"]
+    monkeypatch.delenv("AUDIT_ASK_STEPS")
+    monkeypatch.delenv("AUDIT_ASK")
+    importlib.reload(mcp_server)
+
+
+def test_the_steps_file_reaches_the_tool_env_only_with_the_ask_tool(tmp_path):
+    steps = tmp_path / "ask_steps.json"
+    on = RunContext("p", "m", tmp_path, tmp_path, Path("x.duckdb"), None, 1, 60, allow_ask=True, ask_steps=steps)
+    assert on.tool_env["AUDIT_ASK_STEPS"] == str(steps) and on.tool_env["AUDIT_ASK"] == "1"
+    off = RunContext("p", "m", tmp_path, tmp_path, Path("x.duckdb"), None, 1, 60, ask_steps=steps)
+    assert "AUDIT_ASK_STEPS" not in off.tool_env
+
+
+@pytest.mark.usefixtures("sandbox")
+def test_an_ask_step_batch_offers_the_next_briefs_and_counts_what_it_revealed(monkeypatch, db, questions_on):
+    _with_fake(monkeypatch, Asking(Q04_BODY + "ORDER BY 1", n=3))
+    qdir = questions_on(db, "q04")
+    tasks = load_question(qdir / "q04.toml", ["terse", "spec"])
+    terse, spec = sorted(
+        runner.run_grid(tasks, ["fake:a"], batch="stepping", quiet=True, ask_step=True), key=lambda r: r.task.rank
+    )
+    briefs = {lv["name"]: lv["prompt"].strip() for lv in tomllib.loads((qdir / "q04.toml").read_text())["levels"]}
+    assert json.loads((terse.run_dir / "ask_steps.json").read_text()) == [briefs["stakeholder"], briefs["spec"]]
+    assert json.loads((spec.run_dir / "ask_steps.json").read_text()) == []
+    rows = [json.loads((r.run_dir / "result.json").read_text()) for r in (terse, spec)]
+    assert [(r["asks"], r["revealed"]) for r in rows] == [(3, 2), (3, 0)]
+    # The prompt is --allow-ask's, so the two options differ only in the tool's reply.
+    assert terse.task.prompt_sha == runner.instructed(tasks, allow_ask=True)[0].prompt_sha
+    assert json.loads((runner.RESULTS / "stepping" / "manifest.json").read_text())["run_options"]["ask_step"] is True
+    (terse.run_dir / "result.json").unlink()
+    (again,) = runner.resume("stepping", questions=[qdir], quiet=True)
+    assert json.loads((again.run_dir / "result.json").read_text())["revealed"] == 2
+
+
+def test_pi_extension_reveals_the_next_brief_on_each_ask(tmp_path):
+    module = _transpiled(tmp_path)
+    steps = tmp_path / "ask_steps.json"
+    steps.write_text(json.dumps(["The stakeholder brief.", "The spec brief."]))
+    driver = tmp_path / "driver.mjs"
+    driver.write_text(
+        f"import ext from {json.dumps(str(module))};\n"
+        "const tools = {};\n"
+        "ext({ registerTool: (t) => { tools[t.name] = t; } });\n"
+        "const replies = [];\n"
+        "for (const q of ['Gross or net?', 'Which year?', 'Anything else?']) {\n"
+        "  replies.push((await tools.ask_clarification.execute('id', { question: q })).content[0].text);\n"
+        "}\n"
+        "console.log(JSON.stringify(replies));\n"
+    )
+    run_dir = tmp_path / "out"
+    env = {
+        "PATH": str(Path(shutil.which("node")).parent),
+        "AUDIT_OUT": str(run_dir),
+        "AUDIT_ASK": "1",
+        "AUDIT_ASK_STEPS": str(steps),
+    }
+    run = subprocess.run(["node", str(driver)], capture_output=True, text=True, check=False, env=env)
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout) == [STEP_HEAD + "The stakeholder brief.", STEP_HEAD + "The spec brief.", REPLY]
+    asks = [json.loads(line) for line in (run_dir / "asks.jsonl").read_text().splitlines()]
+    assert [a.get("revealed") for a in asks] == [1, 2, None]

@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 # The models have memorized TPC-H. A prompt that names the benchmark or a query number measures recall.
@@ -47,6 +47,9 @@ class Task:
     # The target's columns that say which row is which (a month, a segment). None: every non-answer column.
     # Columns in neither list are context: not graded and not used to pair rows.
     label_columns: tuple[str, ...] | None = None
+    # The briefs of the more specified levels of the same question, in ladder order: what ask_clarification
+    # reveals, one per ask, in --ask-step batches. Levels with their own target ask another question and are left out.
+    next_briefs: tuple[str, ...] = ()
 
     @property
     def references(self) -> tuple[str, ...]:
@@ -68,8 +71,12 @@ class Task:
         return f"{self.id}/{self.level}"
 
     def check_leaks(self):
-        if m := LEAKY.search(self.prompt):
-            raise ValueError(f"{self.name}: prompt contains {m.group(0)!r}; never name the benchmark or query number")
+        # The briefs an ask may reveal (--ask-step) reach the agent too.
+        for text in (self.prompt, *self.next_briefs):
+            if m := LEAKY.search(text):
+                raise ValueError(
+                    f"{self.name}: prompt contains {m.group(0)!r}; never name the benchmark or query number"
+                )
 
     @classmethod
     def adhoc(
@@ -121,6 +128,7 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
     if db and not db.exists():
         raise ValueError(f"{path}: db {db} does not exist")
     tasks = []
+    briefs = []  # (brief, shares the question's target), per level
     for rank, lv in enumerate(spec.get("levels", [])):
         # A level may override the target when a rung deliberately asks a different question.
         lv_target = (
@@ -143,6 +151,7 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
         if labels is not None and not (isinstance(labels, list) and all(isinstance(c, str) for c in labels)):
             raise ValueError(f"{path}:{lv['name']}: label_columns must be a list of column names")
         brief = lv["prompt"].strip()
+        briefs.append((brief, lv_target is target))
         prompt = brief if lv.get("raw") or not preamble else f"{preamble}\n\n{brief}"
         tasks.append(
             Task(
@@ -159,6 +168,10 @@ def load_question(path: str | Path, levels: list[str] | None = None) -> list[Tas
         )
     if not tasks:
         raise ValueError(f"{path}: no [[levels]]")
+    tasks = [
+        replace(t, next_briefs=tuple(b for b, shared in briefs[i + 1 :] if shared)) if briefs[i][1] else t
+        for i, t in enumerate(tasks)
+    ]
     if levels:
         unknown = set(levels) - {t.level for t in tasks}
         if unknown:

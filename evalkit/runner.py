@@ -52,12 +52,13 @@ DECLARE_GRAIN_INSTRUCTION = (
 )
 
 
-# ... with allow_ask (after the declare instruction when both are on, in the same paragraph).
+# ... with allow_ask or ask_step (after the declare instruction when both are on, in the same paragraph). The two
+# options share the sentence, so their prompts are identical and only the tool's reply differs.
 ASK_INSTRUCTION = "If the request is ambiguous, you may call `ask_clarification` with your question before you answer."
 
 
 # Run options that add an instruction to the prompt (see `instructed`), and so change prompt_sha.
-PROMPT_OPTIONS = ("declare_columns", "declare_grain", "allow_ask")
+PROMPT_OPTIONS = ("declare_columns", "declare_grain", "allow_ask", "ask_step")
 
 
 def declaring(tasks: list[Task], grain: bool = False) -> list[Task]:
@@ -66,7 +67,12 @@ def declaring(tasks: list[Task], grain: bool = False) -> list[Task]:
 
 
 def instructed(
-    tasks: list[Task], *, declare_columns: bool = False, declare_grain: bool = False, allow_ask: bool = False
+    tasks: list[Task],
+    *,
+    declare_columns: bool = False,
+    declare_grain: bool = False,
+    allow_ask: bool = False,
+    ask_step: bool = False,
 ) -> list[Task]:
     """The tasks with the run options' instructions added after each brief (so they are part of prompt_sha).
 
@@ -75,7 +81,7 @@ def instructed(
     parts = []
     if declare_columns or declare_grain:
         parts.append(DECLARE_GRAIN_INSTRUCTION if declare_grain else DECLARE_INSTRUCTION)
-    if allow_ask:
+    if allow_ask or ask_step:
         parts.append(ASK_INSTRUCTION)
     if not parts:
         return list(tasks)
@@ -369,14 +375,17 @@ def run_one(
     declare_columns: bool = False,
     declare_grain: bool = False,
     allow_ask: bool = False,
+    ask_step: bool = False,
 ) -> RunResult:
     """One headless agent session on one task, graded against task.target_sql.
 
     The database is the task's own (a question file's `db`), else `db`, else tpch.duckdb. With
     `declare_columns`, submit_sql also takes the answer's column names and the run is graded by them
     (`declared.grade_task`); `declare_grain` adds the grain. With `allow_ask`, the agent also has
-    ask_clarification, which never answers; result.json records how often it asked and what. The task's
-    prompt must already carry the matching instructions (see `instructed`).
+    ask_clarification, which never answers; result.json records how often it asked and what. `ask_step` offers
+    the same tool, but each ask reveals the brief of the question's next level (task.next_briefs: terse, then
+    stakeholder, then spec), and the non-answer once they run out. The task's prompt must already carry the
+    matching instructions (see `instructed`).
     """
     agent = Agent.parse(agent)
     db = resolve_db(task, db)
@@ -400,6 +409,11 @@ def run_one(
     if (cond_dir / "AGENTS.md").exists():
         notes = work_dir / "AGENTS.md"
         shutil.copy(cond_dir / "AGENTS.md", notes)
+    steps = None
+    if ask_step:
+        # In run_dir, not work_dir: the briefs to come must never sit in the agent's cwd.
+        steps = run_dir / "ask_steps.json"
+        steps.write_text(json.dumps(list(task.next_briefs), indent=2))
 
     ctx = RunContext(
         prompt=task.prompt,
@@ -413,7 +427,8 @@ def run_one(
         extra_args=agent.extra_args,
         declare=declare_columns,
         declare_grain=declare_grain,
-        allow_ask=allow_ask,
+        allow_ask=allow_ask or ask_step,
+        ask_steps=steps,
     )
     res = RunResult(
         batch=batch,
@@ -505,6 +520,8 @@ def run_one(
                 "declaration": declaration,  # declared answer columns and how they lined up ({} if none)
                 "asks": len(questions),  # ask_clarification calls (allow_ask batches only)
                 "ask_questions": questions[:MAX_ASK_QUESTIONS],
+                # ask_step batches: how many of the next briefs the asks revealed (0 to 2 on a three-level question)
+                "revealed": min(len(questions), len(task.next_briefs)) if ask_step else 0,
                 "usage_extra": res.usage.extra,
             },
             indent=2,

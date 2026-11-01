@@ -6,7 +6,8 @@
  *   submit_sql(sql) -> saves the final query to answer.sql and runs it (evalkit re-executes it to grade)
  * and, only with AUDIT_ASK=1, a third:
  *   ask_clarification(question) -> always the same non-answer (ASK_REPLY); logged as an ASK entry in queries.log
- *                                  and appended to asks.jsonl
+ *                                  and appended to asks.jsonl. With AUDIT_ASK_STEPS, the nth ask reveals the
+ *                                  nth brief instead, then ASK_REPLY once they run out
  *
  * Both refuse statements that could write, load extensions, or peek at the TPC-H answer key.
  * The guard between the sqlguard markers mirrors ../sqlguard.py (used by mcp_server.py and the grader).
@@ -17,12 +18,13 @@
  *   AUDIT_DECLARE  1: submit_sql also takes answer_columns, saved to answer_columns.json
  *   AUDIT_DECLARE_GRAIN  1 (with AUDIT_DECLARE): also grain_columns, saved as {"answer": [...], "grain": [...]}
  *   AUDIT_ASK      1: also register ask_clarification
+ *   AUDIT_ASK_STEPS  --ask-step: a JSON file listing the briefs that asks reveal, one per ask
  *
  * Requires the `duckdb` CLI on PATH (brew install duckdb).
  */
 import { Type } from "typebox";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,6 +42,9 @@ const GRAIN = process.env.AUDIT_DECLARE_GRAIN === "1";
 const ASK = process.env.AUDIT_ASK === "1";
 const ASK_REPLY =
   "No clarification is available. Use your best judgement, and state your assumptions in your final message.";
+// --ask-step batches: an ask at one level of the question reveals the next level's brief.
+const STEPS = process.env.AUDIT_ASK_STEPS;
+const STEP_REPLY = "The person who made the request replied with more detail:";
 
 /** The column names in the header line of the duckdb CLI's CSV output (quoted names unquoted). */
 function csvHeader(out: string): string[] {
@@ -319,13 +324,18 @@ export default function (pi: any) {
         question: Type.String({ description: "What you need to know, e.g. which of two definitions they mean." }),
       }),
       async execute(_id: string, params: { question: string }) {
+        mkdirSync(OUT, { recursive: true });
+        const asks = resolve(OUT, "asks.jsonl");
+        // The asks before this one.
+        const n = existsSync(asks) ? readFileSync(asks, "utf8").split("\n").filter(Boolean).length : 0;
+        const briefs: string[] = STEPS ? JSON.parse(readFileSync(STEPS, "utf8")) : [];
+        const revealed = n < briefs.length ? n + 1 : undefined;
         // One line in queries.log, so a question can never look like an entry's end (";") or another entry's header.
-        log("ASK", params.question.split(/\s+/).filter(Boolean).join(" "));
-        appendFileSync(
-          resolve(OUT, "asks.jsonl"),
-          JSON.stringify({ at: new Date().toISOString(), question: params.question }) + "\n",
-        );
-        return { content: [{ type: "text", text: ASK_REPLY }], details: {} };
+        log("ASK", params.question.split(/\s+/).filter(Boolean).join(" "), revealed ? `revealed=${revealed}` : "");
+        const entry = { at: new Date().toISOString(), question: params.question, ...(revealed ? { revealed } : {}) };
+        appendFileSync(asks, JSON.stringify(entry) + "\n");
+        const text = revealed ? `${STEP_REPLY}\n\n${briefs[n]}` : ASK_REPLY;
+        return { content: [{ type: "text", text }], details: {} };
       },
     });
   }

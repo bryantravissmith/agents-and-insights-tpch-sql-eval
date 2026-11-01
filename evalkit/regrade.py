@@ -30,6 +30,7 @@ COPIED = (
     "answer_columns.json",
     "queries.log",
     "asks.jsonl",
+    "ask_steps.json",
     "final_message.txt",
     "meta.json",
 )

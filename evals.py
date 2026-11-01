@@ -81,6 +81,11 @@ def _grid_args(p: argparse.ArgumentParser):
         action="store_true",
         help="agents also get ask_clarification, which never answers; result.json counts the asks (a different prompt)",
     )
+    p.add_argument(
+        "--ask-step",
+        action="store_true",
+        help="as --allow-ask (same prompt), but each ask reveals the question's next level: terse -> stakeholder -> spec",
+    )
     _db_arg(p)
 
 
@@ -126,6 +131,7 @@ def _grid(tasks, args):
         declare_columns=args.declare_columns,
         declare_grain=args.declare_grain,
         allow_ask=args.allow_ask,
+        ask_step=args.ask_step,
     )
     return 0 if results or args.dry_run else 1
 
