@@ -245,16 +245,24 @@ def _latest_per_run(rows: list[dict]) -> list[dict]:
     return [rows[i] for i in sorted(latest.values())]
 
 
-def compact_scorecard(path: Path | None = None) -> int:
-    """Rewrite the scorecard with one row per run; returns how many superseded rows it dropped."""
+def compact_scorecard(path: Path | None = None, refresh: dict[str, dict] | None = None) -> int:
+    """Rewrite the scorecard with one row per run; returns how many superseded rows it dropped.
+
+    `refresh` maps run_dir to that run's current result.json row, whose values replace the scorecard's
+    (a reparse changes usage and cost after the scorecard row was written).
+    """
     path = path or SCORECARD
+    refresh = refresh or {}
     with _locked_scorecard(path):
         if not path.exists():
             return 0
         with open(path, newline="") as f:
             rows = list(csv.DictReader(f))
-        kept = _latest_per_run(rows)
-        if len(kept) < len(rows):
+        kept = [
+            {k: refresh[r["run_dir"]].get(k, "") for k in COLS} if r["run_dir"] in refresh else r
+            for r in _latest_per_run(rows)
+        ]
+        if len(kept) < len(rows) or refresh:
             tmp = path.with_name(path.name + ".tmp")
             with open(tmp, "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=COLS)
@@ -742,10 +750,11 @@ def reparse(batch: str, *, quiet: bool = False) -> int:
         }
         result.write_text(json.dumps(row, indent=2))
         updated += 1
+    rows = [json.loads(p.read_text()) for p in sorted(batch_dir.glob("*/result.json"))]
     if (batch_dir / "results.jsonl").exists():
-        rows = [json.loads(p.read_text()) for p in sorted(batch_dir.glob("*/result.json"))]
         with open(batch_dir / "results.jsonl", "w") as f:
             f.writelines(json.dumps({k: row.get(k, "") for k in COLS}) + "\n" for row in rows)
+    compact_scorecard(refresh={row["run_dir"]: row for row in rows if row.get("run_dir")})
     manifest = json.loads((batch_dir / "manifest.json").read_text())
     manifest.setdefault("reparsed", []).append(
         {"at": datetime.now(UTC).isoformat(timespec="seconds"), "git": _git_state(), "runs": updated}
@@ -889,6 +898,11 @@ def summarize(rows: list[dict]) -> str:
     """Ladder view: one line per task x condition x agent, k/n correct at each level, then cost and effort."""
     if not rows:
         return "no runs"
+    # A harness error (quota, outage, crash) says nothing about the model, so it is left out of k/n, as in report.
+    failed = sum(r["verdict"] == "harness_error" for r in rows)
+    rows = [r for r in rows if r["verdict"] != "harness_error"]
+    if not rows:
+        return f"no graded runs; {failed} harness errors"
     # A level whose prompt was edited between batches is split by prompt hash, never pooled.
     shas: dict[tuple, set] = defaultdict(set)
     for r in rows:
@@ -944,6 +958,8 @@ def summarize(rows: list[dict]) -> str:
     misses = Counter(r["verdict"] for r in rows if not int(r["correct"]))
     n_ok = sum(int(r["correct"]) for r in rows)
     out.append(f"{n_ok}/{len(rows)} correct" + (f"; misses by verdict: {dict(misses.most_common())}" if misses else ""))
+    if failed:
+        out.append(f"left out {failed} harness errors (provider failures, crashes); `resume` re-runs provider failures")
     if any(int(r["lenient"]) > int(r["correct"]) for r in rows):
         out.append("(+n): n more runs had the right rows but added extra columns or never called submit_sql")
     fallback = Counter(r["sql_source"] for r in rows if r["sql_source"] in ("final_message", "last_query"))

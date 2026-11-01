@@ -390,7 +390,17 @@ def test_reparse_fixes_agy_usage_from_the_transcript(sandbox):
         )
     )
     (run.parent / "manifest.json").write_text(json.dumps({"batch": "agyb"}))
+    # The scorecard row written at run time carries the old usage; another batch's row is left alone.
+    rd = "results/agyb/q01-spec-bare-agy-gemini-4-argon-r1"
+    other = {k: "" for k in runner.COLS} | {"batch": "other", "run_dir": "results/other/x", "cost_usd": "9.0"}
+    runner.append_scorecard({k: "" for k in runner.COLS} | {"batch": "agyb", "run_dir": rd, "tokens_in": "-15529"})
+    runner.append_scorecard(other)
+    result = json.loads((run / "result.json").read_text()) | {"run_dir": rd}
+    (run / "result.json").write_text(json.dumps(result))
     assert runner.reparse("agyb", quiet=True) == 1
+    card = {r["run_dir"]: r for r in runner.load_scorecard()}
+    assert card[rd]["tokens_in"] == "20580" and card[rd]["verdict"] == "exact"
+    assert card["results/other/x"]["cost_usd"] == "9.0"
     row = json.loads((run / "result.json").read_text())
     assert (row["tokens_in"], row["tokens_cache_read"], row["turns"], row["verdict"]) == (20580, 36109, "", "exact")
     assert row["usage_extra"]["reported_total_tokens"] == 22059
@@ -480,6 +490,10 @@ def test_summary_splits_edited_prompts():
     }
     out = runner.summarize([base | {"prompt_sha": "aaaaaaaaaa"}, base | {"prompt_sha": "bbbbbbbbbb"}])
     assert "spec@aaaaaaa" in out and "spec@bbbbbbb" in out
+    # A harness error is not a miss: it is left out of k/n and counted below the table.
+    quota = base | {"correct": "0", "lenient": "0", "verdict": "harness_error"}
+    out = runner.summarize([base, quota, quota])
+    assert "1/1" in out and "1/1 correct" in out and "left out 2 harness errors" in out
 
 
 # ---------- per-question databases ----------
