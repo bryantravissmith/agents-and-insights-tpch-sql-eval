@@ -578,6 +578,11 @@ def preflight(
                 named += list(t.checked_columns)
                 if unknown := [c for c in named if c.lower() not in cols]:
                     problems.append(f"{t.name}: answer, label or checked columns {unknown} are not in its target")
+                # Declared grading applies the markings to each accepted form, so they must share the columns.
+                for alt in t.accepted_sql:
+                    alt_cols = {c.lower() for c in grading.expected_result(alt, resolve_db(t, db)).columns}
+                    if alt_cols != cols:
+                        problems.append(f"{t.name}: an accepted_sql has columns {sorted(alt_cols)}, not the target's")
     if problems:
         raise SystemExit("preflight failed:\n  " + "\n  ".join(problems))
 

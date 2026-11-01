@@ -36,7 +36,8 @@ def classify(r: dict, run_dir: Path, task, trap_sql: str) -> tuple[bool, str, di
         return True, "", notes
     if g.verdict in ("no_sql", "sql_error", "bad_declaration"):
         return False, "no answer", notes
-    if grading.grade_any(sql, trap_sql, task.accepted_sql, task.db)[0].correct:
+    # The trap alone: the question's accepted_sql are forms of the right answer, never of the trap.
+    if grading.grade_any(sql, trap_sql, (), task.db)[0].correct:
         return False, "designed trap", notes
     if g.verdict in ("grain_not_unique", "grain_differs"):
         return False, "grain error", notes

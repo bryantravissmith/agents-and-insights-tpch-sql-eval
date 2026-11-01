@@ -252,20 +252,32 @@ ALL = Declaration(None)  # every result column as the answer: how saved runs tha
 def grade_task(candidate_sql: str | None, declared: Declaration | None, task, db: Path) -> tuple[Grade, int, dict]:
     """The grade for one run: by its declaration when it made one and its rows pair up, otherwise against the
     target and its accepted alternatives (`grading.grade_any`). Returns the grade, which reference graded it
-    (0 is the target) and the declaration notes ({} when nothing was declared)."""
+    (0 is the target) and the declaration notes ({} when nothing was declared).
+
+    A declaration is graded against the target and then each accepted alternative (the same answer in another
+    form, such as a share as a percent), as grade_any does for a whole result; the first that passes grades it.
+    Alternatives carry the target's column names, so the markings apply to them unchanged."""
     if declared is not None:
-        hit = grade_declared(
-            candidate_sql,
-            None if declared.answer is None else list(declared.answer),
-            task.target_sql,
-            task.answer_columns,
-            db,
-            task.label_columns,
-            grain=None if declared.grain is None else list(declared.grain),
-            checked_columns=task.checked_columns,
-        )
-        if hit is not None:
-            return hit[0], 0, hit[1] | {"graded_by": "declared columns"}
+        first = None
+        for ref, reference in enumerate(task.references):
+            hit = grade_declared(
+                candidate_sql,
+                None if declared.answer is None else list(declared.answer),
+                reference,
+                task.answer_columns,
+                db,
+                task.label_columns,
+                grain=None if declared.grain is None else list(declared.grain),
+                checked_columns=task.checked_columns,
+            )
+            if hit is None:
+                continue
+            first = first or (hit, ref)
+            if hit[0].correct:
+                return hit[0], ref, hit[1] | {"graded_by": "declared columns"}
+        if first is not None:
+            (g, notes), ref = first
+            return g, ref, notes | {"graded_by": "declared columns"}
     g, ref = grade_any(candidate_sql, task.target_sql, task.accepted_sql, db)
     return g, ref, ({"graded_by": "whole result (labels did not pair)"} if declared is not None else {})
 

@@ -39,6 +39,29 @@ def test_normalize_column_reads_the_same_label_written_different_ways():
     assert normalize_column(["1997-03-15", None]) == ["1997-03-15", None]  # a plain day stays a day
 
 
+def test_a_declaration_is_graded_against_the_accepted_forms_too(synthetic_db):
+    # g04's shape: a share by region, accepted as a fraction or a percent. Found in the grain control: declared
+    # grading tried only the target, so every percent answer failed under --declare-columns.
+    fraction = "SELECT * FROM (VALUES ('AFRICA', 0.85), ('ASIA', 0.84)) t(region, share)"
+    percent = "SELECT * FROM (VALUES ('AFRICA', 85.0), ('ASIA', 84.0)) t(region, share)"
+    t = Task(
+        "g",
+        "terse",
+        "Share by region?",
+        fraction,
+        db=synthetic_db,
+        accepted_sql=(percent,),
+        answer_columns=(("share",),),
+        label_columns=("region",),
+    )
+    agent = "SELECT * FROM (VALUES ('ASIA', 84.0), ('AFRICA', 85.0)) t(customer_region, pct)"
+    g, ref, notes = grade_task(agent, Declaration(("customer_region", "pct")), t, synthetic_db)
+    assert g.correct and ref == 1 and notes["graded_by"] == "declared columns"
+    wrong = "SELECT * FROM (VALUES ('ASIA', 50.0), ('AFRICA', 50.0)) t(customer_region, pct)"
+    g, ref, _ = grade_task(wrong, Declaration(("customer_region", "pct")), t, synthetic_db)
+    assert not g.correct and ref == 0  # a miss reports the target's grade
+
+
 def test_a_shown_checked_count_must_be_right(synthetic_db):
     # q21's shape: "which suppliers", with a count of late orders as checked context.
     ref = "SELECT * FROM (VALUES ('S1', 16), ('S2', 12), ('S3', 9)) t(s_name, numwait)"
