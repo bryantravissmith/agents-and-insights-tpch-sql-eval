@@ -10,6 +10,7 @@ It is deleted after the run unless keep_work=True.
 from __future__ import annotations
 
 import csv
+import fcntl
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ import time
 import uuid
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -224,10 +226,47 @@ def _launch(cmd: list[str], ctx: RunContext, env: dict, timeout_s: int) -> tuple
             return proc.returncode, True
 
 
+@contextmanager
+def _locked_scorecard(path: Path):
+    """Held while the scorecard is written: by threads here and by other evals.py processes (a resume of
+    one batch can run beside a run of another)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _scorecard_lock, open(path.with_name(path.name + ".lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def _latest_per_run(rows: list[dict]) -> list[dict]:
+    """One row per run directory, the last one written: a resumed run replaces its earlier attempt."""
+    latest = {r["run_dir"] or f"row{i}": i for i, r in enumerate(rows)}
+    return [rows[i] for i in sorted(latest.values())]
+
+
+def compact_scorecard(path: Path | None = None) -> int:
+    """Rewrite the scorecard with one row per run; returns how many superseded rows it dropped."""
+    path = path or SCORECARD
+    with _locked_scorecard(path):
+        if not path.exists():
+            return 0
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        kept = _latest_per_run(rows)
+        if len(kept) < len(rows):
+            tmp = path.with_name(path.name + ".tmp")
+            with open(tmp, "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=COLS)
+                w.writeheader()
+                w.writerows(kept)
+            os.replace(tmp, path)
+    return len(rows) - len(kept)
+
+
 def append_scorecard(row: dict, path: Path | None = None) -> None:
     path = path or SCORECARD  # resolved per call so tests can redirect it
-    with _scorecard_lock:
-        path.parent.mkdir(parents=True, exist_ok=True)
+    with _locked_scorecard(path):
         new = not path.exists() or path.stat().st_size == 0
         if not new:
             with open(path) as f:
@@ -665,6 +704,7 @@ def resume(
     )
     manifest.update(completed_at=datetime.now(UTC).isoformat(timespec="seconds"), recorded_runs=len(rows))
     write_manifest(batch_dir, manifest)
+    compact_scorecard()  # the re-run rows replace the attempts they re-ran
     with open(batch_dir / "results.jsonl", "w") as f:
         f.writelines(json.dumps({k: row.get(k, "") for k in COLS}) + "\n" for row in rows)
     report = summarize(rows)
@@ -824,7 +864,7 @@ def progress(batches: list[str] | None = None, results: Path | None = None, now:
 
 
 def load_scorecard(batch: str | None = None, path: Path | None = None) -> list[dict]:
-    """Scorecard rows, optionally one batch ("latest" = most recent)."""
+    """Scorecard rows, one per run, optionally one batch ("latest" = most recent)."""
     path = path or SCORECARD
     if not path.exists():
         return []
@@ -832,6 +872,7 @@ def load_scorecard(batch: str | None = None, path: Path | None = None) -> list[d
         rows = list(csv.DictReader(f))
     if rows and list(rows[0]) != COLS:
         raise RuntimeError(f"{path} has columns {list(rows[0])}; expected {COLS}")
+    rows = _latest_per_run(rows)
     if batch == "latest" and rows:
         batch = max(r["batch"] for r in rows)
     return [r for r in rows if batch is None or r["batch"] == batch]

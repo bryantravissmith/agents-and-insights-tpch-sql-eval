@@ -5,6 +5,7 @@ Tests that take `db` run on the synthetic database and, when it exists, on tpch.
 uv run --with pytest --with duckdb --with 'mcp<2' pytest tests/ -q
 """
 
+import csv
 import json
 import sys
 import tomllib
@@ -302,6 +303,10 @@ def test_resume_reruns_provider_failures_and_unfinished_runs(sandbox, monkeypatc
     assert len(list((batch_dir / "_replaced").iterdir())) == 3
     (entry,) = json.loads((batch_dir / "manifest.json").read_text())["resumes"]
     assert entry["rerun_never_finished"] == 1 and entry["rerun_provider_failures"] == {"fake:a": 2}
+    # The scorecard keeps one row per run: the re-run rows replace the failed attempts.
+    with open(runner.SCORECARD) as f:
+        card = [r for r in csv.DictReader(f) if r["batch"] == "flaky"]
+    assert len(card) == 3 and all(r["verdict"] == "exact" for r in card)
     # A model outcome is never re-run: a second resume finds nothing to do.
     assert runner.resume("flaky", jobs=1, questions=[qdir], quiet=True) == []
 
