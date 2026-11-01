@@ -1,0 +1,27 @@
+id = "h03v2"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Version 2 of h03's terse rung, 2026-11-01. The terse brief asks how few customers make up half of each country's 1995 revenue, so the reference returns nation and that count; v1 also returned the number of customers and the share covered, which only agents that added them matched. 'Revenue' is not defined, but net line revenue and the order total give the same counts in every country, so no alternative is needed. Same traps: only customers with 1995 revenue count; 'half' means at least half, so stopping one customer short is wrong; ties are ordered by customer key."
+target_sql = '''
+WITH rev AS (
+  SELECT c_nationkey, c_custkey, sum(l_extendedprice * (1 - l_discount)) AS revenue
+  FROM customer JOIN orders ON o_custkey = c_custkey JOIN lineitem ON l_orderkey = o_orderkey
+  WHERE o_orderdate >= DATE '1995-01-01' AND o_orderdate < DATE '1996-01-01'
+  GROUP BY c_nationkey, c_custkey),
+r AS (
+  SELECT *, sum(revenue) OVER (PARTITION BY c_nationkey) AS total,
+         sum(revenue) OVER (PARTITION BY c_nationkey ORDER BY revenue DESC, c_custkey ROWS UNBOUNDED PRECEDING) AS cum,
+         row_number() OVER (PARTITION BY c_nationkey ORDER BY revenue DESC, c_custkey) AS k
+  FROM rev)
+SELECT n_name AS nation, min(k) AS customers_for_half
+FROM r JOIN nation ON n_nationkey = c_nationkey
+WHERE cum * 2 >= total
+GROUP BY n_name
+ORDER BY nation
+'''
+
+[[levels]]
+name = "terse"
+prompt = '''
+In each country, how few customers make up half our 1995 revenue?
+'''

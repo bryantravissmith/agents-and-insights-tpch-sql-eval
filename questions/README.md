@@ -35,6 +35,25 @@ The terse rung of the six novel questions, with references that return only what
 
 Two readings are still decided by the author, not the brief: "biggest customer" (n03v2) is ranked by money spent, not by number of orders, and the n05 average counts customers with no 1995 orders as zero.
 
+## Hard questions, version 2 (`tpch-hard-v2/`): provisional
+
+The terse rung of the six hard questions, built the same way as the novel v2 (same prompts, so `evals.py regrade` grades the saved runs). On the terse rung, the v1 hard references did more than the brief asked:
+- **Extra columns:** h02, h03, h04 and h06 return columns the brief never asks for.
+- **Settled choices the brief leaves open:**
+  - h04: "order size" as net line revenue, where 121 of 125 runs used the order's total price;
+  - h06: the year assigned by ship date, where most runs used receipt date;
+  - h05: 1993 compared with 1992;
+  - h02: a 30-day spree gap that counts single orders as sprees.
+
+v2 returns only what each brief asks and accepts alternatives for those choices. On the same 810 saved runs, graded with extra columns allowed, the terse rung goes from 65 runs passing to 651 (h01 is unchanged at 64).
+
+**Read v2 as an upper bound, not a score.** A review by GPT-6.1 Sol, a different model family, found that a list of accepted answers cannot settle an open definition:
+- h02 ("orders close together") has no right threshold.
+- h05 and h06 leave several choices open at once (the comparison window, the ranking method, the date that assigns the year, ties at the cut-off).
+- The alternatives were chosen partly by looking at what most agents did, which grades toward the agents' answers.
+
+The hard terse rung asks questions an exact-match grader can't score. Use the stakeholder and spec rungs, whose briefs define the terms, to compare agents on the hard set. To make the terse rung gradable, the brief has to state the definition (a new prompt, so new runs).
+
 ## Accepted alternatives
 
 A question file, or a level, may list `accepted_sql = ['''...''', ...]`: other queries whose results also count as correct. The grader tries the target first, then each alternative, and takes the first correct match (then the first lenient one); `result.json` records which in `reference` (0 is the target). Use it for representations of the same answer, not for different questions. An alternative belongs to the target it sits beside: a level with its own target does not inherit the file's alternatives.

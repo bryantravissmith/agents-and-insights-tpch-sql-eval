@@ -1,0 +1,103 @@
+id = "h02v2"
+db = "../../tpch.duckdb"
+preamble_file = "../tpch/preamble.md"
+note = "Version 2 of h02's terse rung, 2026-11-01. 'A spree is orders close together' sets neither a gap nor a minimum size: v1's reference used a 30-day gap and counted a single order as a spree, which the brief's own words ('orders close together') argue against, and returned two statistics the brief does not ask for. Most agents chose a 7-day gap and at least two orders. v2 returns segment and spree count and accepts a 7, 14 or 30-day gap with a minimum of one or two orders, so the rung grades the mechanics: the gap is measured from the previous order, and orders outside 1996-1997 neither start nor extend a spree."
+target_sql = '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 30 THEN 1 ELSE 0 END AS new_spree FROM o),
+s AS (SELECT *, sum(new_spree) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey
+                                     ROWS UNBOUNDED PRECEDING) AS spree FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, spree, count(*) AS n FROM s GROUP BY ALL)
+SELECT c_mktsegment AS segment, count(*) FILTER (WHERE n >= 1) AS sprees
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+'''
+# The same with each other gap (days) and minimum spree size.
+accepted_sql = [
+  '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 30 THEN 1 ELSE 0 END AS new_spree FROM o),
+s AS (SELECT *, sum(new_spree) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey
+                                     ROWS UNBOUNDED PRECEDING) AS spree FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, spree, count(*) AS n FROM s GROUP BY ALL)
+SELECT c_mktsegment AS segment, count(*) FILTER (WHERE n >= 2) AS sprees
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+  ''',
+  '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 14 THEN 1 ELSE 0 END AS new_spree FROM o),
+s AS (SELECT *, sum(new_spree) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey
+                                     ROWS UNBOUNDED PRECEDING) AS spree FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, spree, count(*) AS n FROM s GROUP BY ALL)
+SELECT c_mktsegment AS segment, count(*) FILTER (WHERE n >= 1) AS sprees
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+  ''',
+  '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 14 THEN 1 ELSE 0 END AS new_spree FROM o),
+s AS (SELECT *, sum(new_spree) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey
+                                     ROWS UNBOUNDED PRECEDING) AS spree FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, spree, count(*) AS n FROM s GROUP BY ALL)
+SELECT c_mktsegment AS segment, count(*) FILTER (WHERE n >= 2) AS sprees
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+  ''',
+  '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 7 THEN 1 ELSE 0 END AS new_spree FROM o),
+s AS (SELECT *, sum(new_spree) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey
+                                     ROWS UNBOUNDED PRECEDING) AS spree FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, spree, count(*) AS n FROM s GROUP BY ALL)
+SELECT c_mktsegment AS segment, count(*) FILTER (WHERE n >= 1) AS sprees
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+  ''',
+  '''
+WITH o AS (
+  SELECT c_mktsegment, o_custkey, o_orderkey, o_orderdate,
+         lag(o_orderdate) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey) AS prev
+  FROM orders JOIN customer ON c_custkey = o_custkey
+  WHERE o_orderdate >= DATE '1996-01-01' AND o_orderdate < DATE '1998-01-01'),
+f AS (SELECT *, CASE WHEN prev IS NULL OR o_orderdate - prev > 7 THEN 1 ELSE 0 END AS new_spree FROM o),
+s AS (SELECT *, sum(new_spree) OVER (PARTITION BY o_custkey ORDER BY o_orderdate, o_orderkey
+                                     ROWS UNBOUNDED PRECEDING) AS spree FROM f),
+sp AS (SELECT c_mktsegment, o_custkey, spree, count(*) AS n FROM s GROUP BY ALL)
+SELECT c_mktsegment AS segment, count(*) FILTER (WHERE n >= 2) AS sprees
+FROM sp
+GROUP BY c_mktsegment
+ORDER BY segment
+  ''',
+]
+
+[[levels]]
+name = "terse"
+prompt = '''
+How many buying sprees did each market segment have in 1996-97? A spree is orders close together.
+'''

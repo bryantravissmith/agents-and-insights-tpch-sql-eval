@@ -72,6 +72,24 @@ def test_novel_v2_keeps_v1s_prompts_and_answers_and_drops_only_unasked_columns()
     assert [(a[0], b[0]) for a, b in zip(inclusive, exclusive) if a != b] == [("HOUSEHOLD", "HOUSEHOLD")]
 
 
+@pytest.mark.skipif(not (HERE / "tpch.duckdb").exists(), reason="needs tpch.duckdb (uv run setup_db.py)")
+def test_hard_v2_keeps_v1s_prompts_and_every_alternative_is_a_different_answer():
+    v1 = {t.id: t for t in load_questions(HERE / "questions" / "tpch-hard", levels=["terse"])}
+    v2 = {t.id: t for t in load_questions(HERE / "questions" / "tpch-hard-v2")}
+    assert sorted(v2) == [f"{q}v2" for q in sorted(v1)]
+    for qid, t in v2.items():
+        old = v1[qid[:3]]
+        assert t.prompt_sha == old.prompt_sha, qid
+        # v1's answer still passes, with its unasked columns as extras.
+        assert grading.grade_any(old.target_sql, t.target_sql, t.accepted_sql, t.db)[0].verdict in (
+            "exact",
+            "extra_columns",
+        ), qid
+        # An alternative that gives the target's rows is dead weight: value grading already accepts it.
+        target = grading.expected_result(t.target_sql, t.db).rows
+        assert all(grading.expected_result(a, t.db).rows != target for a in t.accepted_sql), qid
+
+
 def test_regrade_matches_runs_by_prompt_and_keeps_the_original(tmp_path, synthetic_db):
     qdir = tmp_path / "questions" / "set-v2"
     _question(

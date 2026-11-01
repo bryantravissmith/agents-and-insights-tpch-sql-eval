@@ -20,7 +20,7 @@ from pathlib import Path
 from .report import LEVELS, cell, load_rows, question_sets
 
 SEED, DRAWS = 20261031, 2000
-SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard"]
+SET_ORDER = ["tpch", "tpch-novel", "tpch-novel-v2", "tpch-hard", "tpch-hard-v2"]
 
 # Three grading rules, from the grader's verdicts (see evalkit/grading.py):
 #   strict    the grader's `correct`: the reference's columns and rows
