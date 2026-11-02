@@ -1,0 +1,8 @@
+[
+ {
+  "harness": "agy",
+  "model": "gemini-3.8-flash-medium",
+  "extra_args": [],
+  "label": "agy:gemini-3.8-flash"
+ }
+]
