@@ -11,7 +11,7 @@
 # Gemini follows as its own batch once its weekly quota resets (Nov 7), with the same frozen files.
 #
 #   bash experiments/grid-v3-2026-11-01.sh            # starts the three lanes in the background
-#   bash experiments/grid-v3-2026-11-01.sh openai     # one lane in the foreground (openai, claude-code, xai)
+#   bash experiments/grid-v3-2026-11-01.sh openai     # one lane in the foreground (openai, ask-step, claude-code, xai)
 #   DRY_RUN=1 bash experiments/grid-v3-2026-11-01.sh  # prints every plan, runs nothing
 #   uv run evals.py progress                           # while they run
 set -euo pipefail
@@ -28,9 +28,16 @@ batch() {  # name, jobs, agents file, extra flags...
 
 lane() {
   case $1 in
+    # 8 parallel, not v1's 16: on 2026-11-01, 16 drew OpenAI 429s on a third of the first 334 runs.
     openai)
-      batch grid-v3-openai 16 experiments/full-grid-agents-openai.json --allow-ask
-      batch grid-v3-openai-ask-step 16 experiments/full-grid-agents-openai.json --ask-step -l terse stakeholder
+      batch grid-v3-openai 8 experiments/full-grid-agents-openai.json --allow-ask
+      lane ask-step
+      ;;
+    ask-step) batch grid-v3-openai-ask-step 8 experiments/full-grid-agents-openai.json --ask-step -l terse stakeholder ;;
+    # A stopped OpenAI batch: re-runs its missing runs and provider failures, then the ask-step batch.
+    openai-resume)
+      uv run evals.py resume "$2" -j 8
+      lane ask-step
       ;;
     claude-code) batch grid-v3-claude-code 6 experiments/full-grid-agents-claude-code.json --allow-ask ;;
     xai) batch grid-v3-xai 8 experiments/full-grid-agents-xai.json --allow-ask ;;
@@ -39,7 +46,7 @@ lane() {
 }
 
 if [[ $# -gt 0 ]]; then
-  lane "$1"
+  lane "$@"
 elif [[ -n "${DRY_RUN:-}" ]]; then
   for l in openai claude-code xai; do lane "$l"; done
 else
