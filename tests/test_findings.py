@@ -87,6 +87,34 @@ def test_repeats_and_failures():
     assert fail[("tpch", "spec")] == {"values_differ": 1, "(never submitted)": 1}
 
 
+def test_a_v3_grid_compares_its_own_tpch_and_novel_sets(tmp_path):
+    # v3 ids and folders carry a version suffix (q1v3 in tpch-v3) so they never collide with v1.
+    from evalkit.report import base_id, base_set, main_set
+
+    assert (base_id("q21v3"), base_id("h04v2"), base_id("q21")) == ("q21", "h04", "q21")
+    assert (base_set("tpch-v3"), base_set("tpch-novel-v2"), base_set("tpch")) == ("tpch", "tpch-novel", "tpch")
+    assert main_set({"tpch", "tpch-v3"}, "tpch") == "tpch-v3" and main_set({"tpch"}, "tpch") == "tpch"
+    qdir = tmp_path / "questions"
+    for s, ids in (("tpch-v3", ["q1v3", "q2v3"]), ("tpch-novel-v3", ["n1v3", "n2v3"])):
+        (qdir / s).mkdir(parents=True)
+        for i in ids:
+            (qdir / s / f"{i}.toml").write_text(f'id = "{i}"\n')
+    results = tmp_path / "results"
+    for agent in ("pi:a", "pi:b"):
+        for task in ("q1v3", "q2v3", "n1v3", "n2v3"):
+            for level in ("terse", "spec"):
+                row = _row(agent, task, level, "exact" if task.startswith("q") or level == "spec" else "values_differ")
+                d = results / "b" / Path(row["run_dir"]).name
+                d.mkdir(parents=True)
+                (d / "result.json").write_text(json.dumps(row))
+                (d / "prompt.md").write_text("preamble\n\nHow much?")
+    audit = tmp_path / "runs.jsonl"
+    audit.write_text("")
+    f = findings.run_findings(["b"], tmp_path / "out", audit_runs=audit, results=results, questions=qdir, root=tmp_path)
+    assert f["gaps"]["terse"]["pi:a"]["gap"] == 1.0 and f["gaps"]["spec"]["pi:a"]["gap"] == 0.0
+    assert list(f["terse_rules"]) == ["tpch-novel-v3"]
+
+
 def test_run_findings_writes_deterministic_files(tmp_path):
     qdir = tmp_path / "questions"
     for s, ids in (("tpch", ["q1", "q2"]), ("tpch-novel", ["n1", "n2"])):

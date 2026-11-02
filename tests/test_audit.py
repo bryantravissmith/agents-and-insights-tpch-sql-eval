@@ -86,6 +86,12 @@ def test_exposure_signals(tmp_path):
     # The official title counts, and so does asking the engine for the query by number.
     (run / "final_message.txt").write_text("This follows the 'suppliers who kept orders waiting' definition.")
     assert audit.exposure(run, "q21", set())["names_query"] is True
+    # A v3 question is a version of the TPC-H query: q21v3 is query 21, by title and by number.
+    assert audit.exposure(run, "q21v3", set())["names_query"] is True
+    (run / "final_message.txt").write_text("This is the standard TPC-H Q21 query.")
+    assert audit.exposure(run, "q21v3", set())["names_query"] is True
+    assert audit.exposure(run, "n03v3", set())["names_query"] is False
+    (run / "final_message.txt").write_text("This follows the 'suppliers who kept orders waiting' definition.")
     _log(
         run,
         ("REFUSED", "SELECT query FROM tpch_queries() WHERE query_nr = 21"),

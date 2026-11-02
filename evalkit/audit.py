@@ -211,9 +211,12 @@ def exposure(run_dir: Path, task_id: str, markers: set[str]) -> dict:
     # "shipping priority" and "pricing summary" are ordinary phrases some briefs contain).
     prompt_file = run_dir / "prompt.md"
     brief = {_stem(w) for w in _norm(prompt_file.read_text() if prompt_file.exists() else "").split()}
-    title = query_titles().get(task_id)
+    from .report import base_id
+
+    qid = base_id(task_id)  # q21v3 is TPC-H's query 21
+    title = query_titles().get(qid)
     distinctive = bool(title) and not all(_stem(w) in brief for w in _norm(title).split())
-    names_query = (task_id.startswith("q") and str(int(task_id[1:])) in named) or (
+    names_query = (bool(re.fullmatch(r"q\d+", qid)) and str(int(qid[1:])) in named) or (
         distinctive and _norm(title) in _norm(message)
     )
     first = next((s for _, s in entries), "")
@@ -318,6 +321,8 @@ def _pct(k: int, n: int) -> str:
 
 
 def summary_markdown(audited: list[dict], batches: list[str]) -> str:
+    from .report import main_set
+
     agents = list(dict.fromkeys(a["agent"] for a in audited))
     sets = sorted({a["set"] for a in audited})
     out = [
@@ -371,7 +376,7 @@ def summary_markdown(audited: list[dict], batches: list[str]) -> str:
         cells = []
         for lv in ("terse", "stakeholder", "spec"):
             pair = []
-            for s in ("tpch", "tpch-novel"):
+            for s in (main_set(sets, "tpch"), main_set(sets, "tpch-novel")):
                 rs = [a for a in audited if a["agent"] == ag and a["set"] == s and a["level"] == lv]
                 pair.append(f"{100 * sum(bool(a['recall_markers']) for a in rs) / len(rs):.0f}%" if rs else "-")
             cells.append(" / ".join(pair))

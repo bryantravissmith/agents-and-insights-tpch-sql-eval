@@ -19,7 +19,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from .grading import CORRECT, EXACT_COLUMNS
-from .report import LEVELS, cell, load_rows, question_sets
+from .report import LEVELS, base_set, cell, load_rows, main_set, question_sets
 from .runner import asked
 
 SEED, DRAWS = 20261031, 2000
@@ -372,13 +372,15 @@ def build(
     complete = [a for a in agents if not left_out[a]]
     t = tally(rows)
     by_rule = {rule: tally(rows, rule) for rule in RULES}
-    novel = [s for s in by_set if s.startswith("tpch-novel") and "tpch" in by_set]
+    # TPC-H and novel are compared as the v3 sets in a v3 grid, the originals otherwise.
+    tpch, novel_set = main_set(by_set, "tpch"), main_set(by_set, "tpch-novel")
+    novel = [s for s in by_set if base_set(s) == "tpch-novel" and tpch in by_set]
     return {
         "terse_rules": {
             s: {
                 rule: {
-                    "gaps": gaps(tr, agents, by_set, "terse", b_set=s),
-                    "ranks": rank_agreement(tr, complete, by_set, "terse", b_set=s),
+                    "gaps": gaps(tr, agents, by_set, "terse", a_set=tpch, b_set=s),
+                    "ranks": rank_agreement(tr, complete, by_set, "terse", a_set=tpch, b_set=s),
                 }
                 for rule, tr in by_rule.items()
             }
@@ -392,9 +394,9 @@ def build(
         "partial": {a: left_out[a] for a in agents if left_out[a]},
         "complete": complete,
         "accuracy": accuracy(t, agents, by_set),
-        "gaps": {lv: gaps(t, agents, by_set, lv) for lv in LEVELS},
-        "ranks": {lv: rank_agreement(t, complete, by_set, lv) for lv in LEVELS},
-        "recall": recall_vs_correct(rows, audit),
+        "gaps": {lv: gaps(t, agents, by_set, lv, a_set=tpch, b_set=novel_set) for lv in LEVELS},
+        "ranks": {lv: rank_agreement(t, complete, by_set, lv, a_set=tpch, b_set=novel_set) for lv in LEVELS},
+        "recall": recall_vs_correct(rows, audit, set_name=tpch),
         "repeats": repeat_agreement(t, sets),
         "failures": failure_modes(rows, sets),
         # A re-graded run is a second grade of a run already counted, not a second run to pay for.

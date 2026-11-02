@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import statistics
 import tomllib
 from collections import defaultdict
@@ -27,6 +28,27 @@ def question_sets(questions: Path | None = None) -> dict[str, str]:
     for f in sorted((questions or HARNESS_DIR / "questions").glob("*/*.toml")):
         out[tomllib.loads(f.read_text()).get("id", f.stem)] = f.parent.name
     return out
+
+
+# Later versions of a question or set carry a suffix (h04v2, q21v3; tpch-novel-v2, tpch-v3) so they never collide
+# with the earlier ones. These give the question and set they are versions of.
+_ID_VERSION = re.compile(r"v\d+$")
+_SET_VERSION = re.compile(r"-v\d+$")
+
+
+def base_id(task_id: str) -> str:
+    """The question a task id is a version of: q21v3 -> q21."""
+    return _ID_VERSION.sub("", task_id)
+
+
+def base_set(set_name: str) -> str:
+    """The set a question folder is a version of: tpch-v3 -> tpch, tpch-novel-v2 -> tpch-novel."""
+    return _SET_VERSION.sub("", set_name)
+
+
+def main_set(found, base: str) -> str:
+    """The set that stands for `base` among the sets `found`: v3 when present, else the original."""
+    return f"{base}-v3" if f"{base}-v3" in found else base
 
 
 def load_rows(batches: list[str], results: Path | None = None) -> list[dict]:
