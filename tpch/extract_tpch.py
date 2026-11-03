@@ -10,6 +10,7 @@ Writes:
   out/answers/sf0.1/q01.csv ...    validated answers (pipe-delimited as DuckDB ships them)
 Also runs each query at SF=0.1 and reports whether the live result matches the shipped answer.
 """
+
 import os
 import sys
 
@@ -98,9 +99,11 @@ def main():
         "key here is not disputed.\n"
     )
     md.append("## Setup\n")
-    md.append("```sql\nINSTALL tpch; LOAD tpch;\nCALL dbgen(sf=0.1);           -- ~100MB; use sf=1 for ~1GB\n"
-              "SELECT * FROM tpch_queries();  -- the 22 queries\n"
-              "SELECT * FROM tpch_answers();  -- validated results at sf 0.01, 0.1, 1\nPRAGMA tpch(1);               -- run query 1\n```\n")
+    md.append(
+        "```sql\nINSTALL tpch; LOAD tpch;\nCALL dbgen(sf=0.1);           -- ~100MB; use sf=1 for ~1GB\n"
+        "SELECT * FROM tpch_queries();  -- the 22 queries\n"
+        "SELECT * FROM tpch_answers();  -- validated results at sf 0.01, 0.1, 1\nPRAGMA tpch(1);               -- run query 1\n```\n"
+    )
     md.append("## Verification at SF " + str(SF) + "\n")
     md.append("Each query below was run live against `dbgen(sf=0.1)` and compared to the shipped answer.\n")
 
@@ -149,6 +152,7 @@ def _norm(v):
     """Normalize a live cell for comparison: numbers -> rounded float, dates -> ISO, else str."""
     import datetime
     import decimal
+
     if v is None:
         return "NULL"
     if isinstance(v, (int, float, decimal.Decimal)):

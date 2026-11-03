@@ -387,6 +387,7 @@ def build(
             for s in novel
         },
         "versions": version_shift(rows),
+        "batches": batches,
         "rows": rows,
         "sets": sets,
         "by_set": dict(by_set),
@@ -413,8 +414,9 @@ def markdown(f: dict) -> str:
         return f"{a} (partial)" if a in partial else a
 
     out = [
-        "# Findings: the 2026-10-31 full grid",
+        "# Findings",
         "",
+        f"Batches: {', '.join(f['batches'])}.",
         (
             f"{len(f['rows'])} runs of {len(agents)} agents on {sum(len(v) for v in by_set.values())} questions "
             f"({', '.join(f'{len(v)} {k}' for k, v in sorted(by_set.items()))}), three brief levels, ten repeats."
@@ -448,10 +450,10 @@ def markdown(f: dict) -> str:
             "Caveat on the novel and hard sets: their questions and reference SQL were drafted by Claude Opus 5.5"
             " (in Claude Code, then checked by hand). The v1 terse references carry that model's habits: columns"
             " the brief never asks for (a count, a denominator), and one form of a value (a month as 'YYYY-MM')."
-            " The v2 sets (`tpch-novel-v2`, `tpch-hard-v2`) re-grade the same terse runs against references that"
-            " return only what each brief asks, and accept the same value in other forms. Their definitions are"
-            " unchanged: on a terse brief the definition is left open on purpose, and the intended one is the"
-            " rubric, so a reasonable assumption that differs is graded wrong (see section 8)."
+            " Later versions (v2 re-grades the v1 runs; v3 is run fresh) use references that return only what each"
+            " brief asks, and accept the same value in other forms. On a terse brief the definition is left open on"
+            " purpose, and the intended one is the rubric, so a reasonable assumption that differs is graded wrong"
+            " (see section 8)."
         ),
         "",
         "### 2a. Terse briefs: correct, with two notes",

@@ -68,13 +68,21 @@ uv run evals.py run questions/tpch -a pi:openai/gpt-5.6-luna -l terse --ask-step
 From Python (a notebook, a script):
 
 ```python
-import sys; H = "."; sys.path.insert(0, H)   # run from the repo root; needs duckdb in the environment
+import sys
+
+H = "."
+sys.path.insert(0, H)  # run from the repo root; needs duckdb in the environment
 from evalkit import Agent, Task, load_questions, run_grid, run_one, grade_sql
 
 tasks = load_questions(f"{H}/questions/tpch/q21.toml", levels=["terse", "spec"])
 tasks.append(Task.adhoc("Which nations have the most suppliers?", target_sql="SELECT n_name, count(*) ..."))
-results = run_grid(tasks, ["pi:anthropic/claude-sonnet-5-5", "agy:claude-sonnet-5-5-medium"],
-                   conditions=["bare", "notes"], repeats=5, jobs=8)
+results = run_grid(
+    tasks,
+    ["pi:anthropic/claude-sonnet-5-5", "agy:claude-sonnet-5-5-medium"],
+    conditions=["bare", "notes"],
+    repeats=5,
+    jobs=8,
+)
 [r.verdict for r in results]
 ```
 

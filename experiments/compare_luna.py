@@ -24,12 +24,12 @@ def sha(path):
 def main():
     ap = argparse.ArgumentParser()
     source = Path(__file__).resolve().parents[1]
-    ap.add_argument("--question", choices=sorted(p.stem for p in (source / "questions/tpch").glob("*.toml")),
-                    default="q01")
+    ap.add_argument(
+        "--question", choices=sorted(p.stem for p in (source / "questions/tpch").glob("*.toml")), default="q01"
+    )
     ap.add_argument("--repeats", type=int, default=30)
     ap.add_argument("--jobs", type=int, default=12)
-    ap.add_argument("--level", dest="levels", choices=("terse", "stakeholder", "spec"),
-                    nargs="+", default=["spec"])
+    ap.add_argument("--level", dest="levels", choices=("terse", "stakeholder", "spec"), nargs="+", default=["spec"])
     ap.add_argument("--name")
     ap.add_argument("--agents-json", type=Path, help="JSON list of explicit Agent configurations")
     args = ap.parse_args()
@@ -57,16 +57,16 @@ def main():
 
     from evalkit import Agent, load_question, runner
 
-    tasks = [dataclasses.replace(task, db=snapshot / "orders.duckdb")
-             for task in load_question(question, args.levels)]
+    tasks = [dataclasses.replace(task, db=snapshot / "orders.duckdb") for task in load_question(question, args.levels)]
     agents = [
         Agent("pi", "openai/gpt-5.6-luna", extra_args=("--thinking", "medium"), label="pi:luna-medium"),
-        Agent("codex", "gpt-5.6-luna", extra_args=("-c", 'model_reasoning_effort="medium"'),
-              label="codex:luna-medium"),
+        Agent("codex", "gpt-5.6-luna", extra_args=("-c", 'model_reasoning_effort="medium"'), label="codex:luna-medium"),
     ]
     if args.agents_json:
-        agents = [Agent(**(a | {"extra_args": tuple(a.get("extra_args", []))}))
-                  for a in json.loads(args.agents_json.read_text())]
+        agents = [
+            Agent(**(a | {"extra_args": tuple(a.get("extra_args", []))}))
+            for a in json.loads(args.agents_json.read_text())
+        ]
         if not agents or len({a.slug for a in agents}) != len(agents):
             raise ValueError("Agent configurations must have unique names and cannot be empty")
         shutil.copy2(args.agents_json, snapshot / "agents.json")
@@ -84,19 +84,30 @@ def main():
     versions["python"] = sys.version
     versions["python_duckdb"] = duckdb.__version__
     manifest = {
-        "batch": batch, "task": args.question, "levels": [task.level for task in tasks],
-        "level": tasks[0].level if len(tasks) == 1 else "mixed", "condition": "bare",
+        "batch": batch,
+        "task": args.question,
+        "levels": [task.level for task in tasks],
+        "level": tasks[0].level if len(tasks) == 1 else "mixed",
+        "condition": "bare",
         "prompt_shas": {task.level: task.prompt_sha for task in tasks},
         "repeats_per_harness_per_level": args.repeats,
-        "planned_runs": planned_runs, "jobs": args.jobs, "reasoning_effort": "medium",
-        "timeout_seconds": 300, "versions": versions,
+        "planned_runs": planned_runs,
+        "jobs": args.jobs,
+        "reasoning_effort": "medium",
+        "timeout_seconds": 300,
+        "versions": versions,
         "agents": [dataclasses.asdict(a) for a in agents],
-        "snapshot_sha256": {str(p.relative_to(snapshot)): sha(p) for p in snapshot.rglob("*")
-                            if p.is_file() and "__pycache__" not in p.parts},
-        "notes": ["No failed-run replacement or selective reruns.",
-                  "Requested model IDs are recorded per agent; API and subscription backends may differ.",
-                  "TPC-H schema can be recognized from training; this is a single-question repeatability test.",
-                  "Prompt levels and harnesses are interleaved within each repeat."],
+        "snapshot_sha256": {
+            str(p.relative_to(snapshot)): sha(p)
+            for p in snapshot.rglob("*")
+            if p.is_file() and "__pycache__" not in p.parts
+        },
+        "notes": [
+            "No failed-run replacement or selective reruns.",
+            "Requested model IDs are recorded per agent; API and subscription backends may differ.",
+            "TPC-H schema can be recognized from training; this is a single-question repeatability test.",
+            "Prompt levels and harnesses are interleaved within each repeat.",
+        ],
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(f"EXPERIMENT_DIR={out}", flush=True)
@@ -110,24 +121,32 @@ def main():
             active += 1
             peak = max(peak, active)
             with (out / "concurrency.jsonl").open("a") as f:
-                f.write(json.dumps({"event": "start", "time": time.time(), "active": active,
-                                    "run": ctx.run_dir.name}) + "\n")
+                f.write(
+                    json.dumps({"event": "start", "time": time.time(), "active": active, "run": ctx.run_dir.name})
+                    + "\n"
+                )
         try:
             return launch(cmd, ctx, env, timeout_s)
         finally:
             with lock:
                 active -= 1
                 with (out / "concurrency.jsonl").open("a") as f:
-                    f.write(json.dumps({"event": "end", "time": time.time(), "active": active,
-                                        "run": ctx.run_dir.name}) + "\n")
+                    f.write(
+                        json.dumps({"event": "end", "time": time.time(), "active": active, "run": ctx.run_dir.name})
+                        + "\n"
+                    )
 
     runner._launch = traced_launch
     t0 = time.monotonic()
-    results = runner.run_grid(tasks, agents, conditions=["bare"], repeats=args.repeats,
-                              jobs=args.jobs, batch=batch, timeout_s=300)
-    manifest.update(completed_at=datetime.now(UTC).isoformat(),
-                    elapsed_seconds=time.monotonic() - t0, observed_peak_concurrency=peak,
-                    recorded_runs=len(results))
+    results = runner.run_grid(
+        tasks, agents, conditions=["bare"], repeats=args.repeats, jobs=args.jobs, batch=batch, timeout_s=300
+    )
+    manifest.update(
+        completed_at=datetime.now(UTC).isoformat(),
+        elapsed_seconds=time.monotonic() - t0,
+        observed_peak_concurrency=peak,
+        recorded_runs=len(results),
+    )
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     if len(results) != planned_runs:
         raise RuntimeError("Incomplete experiment: attempts are missing")

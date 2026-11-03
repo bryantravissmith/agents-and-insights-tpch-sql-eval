@@ -7,6 +7,7 @@
 The agent never sees this script or the tpch extension; it gets the resulting file only.
 Usage: python3 setup_db.py [sf]      (default 0.1)
 """
+
 import os
 import sys
 

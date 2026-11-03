@@ -20,9 +20,11 @@ from evalkit import grading, harnesses, runner
 # Recorded standard API prices, verified against this official page on this date.
 # Estimates are a comparison basis, not subscription billing or an invoice.
 LUNA_PRICING = {
-    "model": "gpt-5.6-luna", "checked_on": "2026-10-25",
+    "model": "gpt-5.6-luna",
+    "checked_on": "2026-10-25",
     "source": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
-    "input_per_million": 0.20, "cached_input_per_million": 0.02,
+    "input_per_million": 0.20,
+    "cached_input_per_million": 0.02,
     "output_per_million": 1.20,
 }
 
@@ -30,18 +32,22 @@ LUNA_PRICING = {
 PRICING = {
     "gpt-5.6-luna": LUNA_PRICING | {"context_threshold": 272001},
     "claude-sonnet-5-5": {
-        "input_per_million": 2.0, "cached_input_per_million": 0.1,
+        "input_per_million": 2.0,
+        "cached_input_per_million": 0.1,
         "output_per_million": 10.0,
         "source": "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
         "note": "Cache-write estimates withheld when TTL is unavailable; use CLI-reported cost.",
     },
     "grok-4.7": {
-        "input_per_million": 2.0, "cached_input_per_million": 0.5,
-        "output_per_million": 6.0, "context_threshold": 200000,
+        "input_per_million": 2.0,
+        "cached_input_per_million": 0.5,
+        "output_per_million": 6.0,
+        "context_threshold": 200000,
         "source": "https://docs.x.ai/developers/models/grok-4.7",
     },
     "gemini-3.8-flash-medium": {
-        "input_per_million": 0.75, "cached_input_per_million": 0.075,
+        "input_per_million": 0.75,
+        "cached_input_per_million": 0.075,
         "output_per_million": 3.75,
         "source": "https://ai.google.dev/gemini-api/docs/pricing#gemini-3.8-flash",
         "note": "Standard introductory prices through 2026-12-31; no explicit cache storage created.",
@@ -84,9 +90,13 @@ def main():
             entries = runner._log_entries(run)
             calls = Counter(k for k, _ in entries)
             counts.update(calls)
-            audit = {"run": run.name, "strict_ordered_unrounded_match": False,
-                     "query_log_counts": dict(calls), "candidate_columns": [],
-                     "sql_source": row["sql_source"]}
+            audit = {
+                "run": run.name,
+                "strict_ordered_unrounded_match": False,
+                "query_log_counts": dict(calls),
+                "candidate_columns": [],
+                "sql_source": row["sql_source"],
+            }
             answer = run / "answer.sql"
             submitted = answer.exists()
             sql = answer.read_text() if submitted else None
@@ -101,20 +111,21 @@ def main():
                 audit.update(regraded_verdict=grade.verdict, detail=grade.detail)
                 try:
                     got = grading.execute(sql, db)
-                    strict = (len(got.columns) == len(expected.columns)
-                              and len(got.rows) == len(expected.rows)
-                              and all(all(strict_cell(x, y) for x, y in zip(a, b))
-                                      for a, b in zip(got.rows, expected.rows)))
-                    audit.update(strict_ordered_unrounded_match=strict,
-                                 candidate_columns=list(got.columns))
+                    strict = (
+                        len(got.columns) == len(expected.columns)
+                        and len(got.rows) == len(expected.rows)
+                        and all(all(strict_cell(x, y) for x, y in zip(a, b)) for a, b in zip(got.rows, expected.rows))
+                    )
+                    audit.update(strict_ordered_unrounded_match=strict, candidate_columns=list(got.columns))
                     strict_passes += int(strict and submitted)
                     candidate_strict_passes += int(strict)
                 except grading.SQLError as e:
                     audit["audit_error"] = str(e)
             else:
                 audit["regraded_verdict"] = "no_sql"
-            ctx = harnesses.RunContext(prompt="", model=row["model"], work_dir=run, run_dir=run,
-                                      db=db, notes=None, max_turns=0, timeout_s=0)
+            ctx = harnesses.RunContext(
+                prompt="", model=row["model"], work_dir=run, run_dir=run, db=db, notes=None, max_turns=0, timeout_s=0
+            )
             usage = harnesses.get(harness).parse(ctx, run / "transcript.jsonl")
             usages.append(usage)
             if harness == "pi":
@@ -125,26 +136,34 @@ def main():
             elif harness == "grok":
                 models.update({k: v.get("modelCalls", 1) for k, v in usage.extra.get("modelUsage", {}).items()})
             audits.append(audit)
-        p95 = (statistics.quantiles(durations, n=100, method="inclusive")[94]
-               if len(durations) > 1 else durations[0])
+        p95 = statistics.quantiles(durations, n=100, method="inclusive")[94] if len(durations) > 1 else durations[0]
         metrics.setdefault(level, {})[agent] = {
-            "harness": harness, "agent": agent, "model": subset[0]["model"],
-            "n": len(subset), "correct": sum(int(r["correct"]) for r in subset),
-            "strict_passes": strict_passes, "candidate_strict_passes": candidate_strict_passes,
+            "harness": harness,
+            "agent": agent,
+            "model": subset[0]["model"],
+            "n": len(subset),
+            "correct": sum(int(r["correct"]) for r in subset),
+            "strict_passes": strict_passes,
+            "candidate_strict_passes": candidate_strict_passes,
             "verdicts": dict(Counter(r["verdict"] for r in subset)),
             "submission_sources": dict(Counter(r["sql_source"] for r in subset)),
             "process_errors": dict(Counter(r["error"] for r in subset if r.get("error"))),
             "exit_codes": dict(Counter(str(r["exit_code"]) for r in subset)),
-            "median_seconds": statistics.median(durations), "p95_seconds": p95,
-            "mean_seconds": statistics.mean(durations), "min_seconds": min(durations),
+            "median_seconds": statistics.median(durations),
+            "p95_seconds": p95,
+            "mean_seconds": statistics.mean(durations),
+            "min_seconds": min(durations),
             "max_seconds": max(durations),
             "sql_attempts": counts["RUN"] + counts["ERROR"],
             "mean_queries": (counts["RUN"] + counts["ERROR"]) / len(subset),
-            "successful_sql_calls": counts["RUN"], "failed_sql_calls": counts["ERROR"],
+            "successful_sql_calls": counts["RUN"],
+            "failed_sql_calls": counts["ERROR"],
             "refused_sql_calls": counts["REFUSED"],
-            "submit_calls": counts["SUBMIT"], "failed_submit_calls": counts["SUBMIT-ERROR"],
+            "submit_calls": counts["SUBMIT"],
+            "failed_submit_calls": counts["SUBMIT-ERROR"],
             "sum_run_seconds": sum(durations),
-            "query_log_counts": dict(counts), "unique_sql_texts": len(sql_texts),
+            "query_log_counts": dict(counts),
+            "unique_sql_texts": len(sql_texts),
             "cost_usd": sum(u.cost_usd for u in usages) if all(u.cost_usd is not None for u in usages) else None,
             "model_messages": dict(models),
             "tokens_uncached_in": sum(u.tokens_in for u in usages),
@@ -156,24 +175,41 @@ def main():
         price = PRICING.get(model)
         estimate = None
         full_input = [u.tokens_in + u.tokens_cache_read + u.tokens_cache_write for u in usages]
-        if (price and all(n < price.get("context_threshold", float("inf")) for n in full_input)
-                and all(u.tokens_cache_write == 0 or "cache_write_per_million" in price for u in usages)):
-            estimate = sum((u.tokens_in * price["input_per_million"]
-                            + u.tokens_cache_read * price["cached_input_per_million"]
-                            + u.tokens_cache_write * price.get("cache_write_per_million", 0)
-                            + u.tokens_out * price["output_per_million"]) / 1_000_000 for u in usages)
+        if (
+            price
+            and all(n < price.get("context_threshold", float("inf")) for n in full_input)
+            and all(u.tokens_cache_write == 0 or "cache_write_per_million" in price for u in usages)
+        ):
+            estimate = sum(
+                (
+                    u.tokens_in * price["input_per_million"]
+                    + u.tokens_cache_read * price["cached_input_per_million"]
+                    + u.tokens_cache_write * price.get("cache_write_per_million", 0)
+                    + u.tokens_out * price["output_per_million"]
+                )
+                / 1_000_000
+                for u in usages
+            )
         cost = group["cost_usd"]
         display_cost = cost if cost is not None else estimate
-        group.update(api_equivalent_cost_usd=estimate, display_cost_usd=display_cost,
-                     cost_per_run_usd=display_cost / len(subset) if display_cost is not None else None,
-                     cost_basis="CLI-reported" if cost is not None else
-                     "API-equivalent estimate" if estimate is not None else "unavailable",
-                     tokens_cache_write=sum(u.tokens_cache_write for u in usages),
-                     max_run_input_tokens=max(full_input),
-                     usage_reparsed_from_raw_transcripts=True)
+        group.update(
+            api_equivalent_cost_usd=estimate,
+            display_cost_usd=display_cost,
+            cost_per_run_usd=display_cost / len(subset) if display_cost is not None else None,
+            cost_basis="CLI-reported"
+            if cost is not None
+            else "API-equivalent estimate"
+            if estimate is not None
+            else "unavailable",
+            tokens_cache_write=sum(u.tokens_cache_write for u in usages),
+            max_run_input_tokens=max(full_input),
+            usage_reparsed_from_raw_transcripts=True,
+        )
     analysis = {
-        "batch": batch.name, "task": manifest["task"],
-        "levels": sorted({r["level"] for r in rows}), "metrics": metrics,
+        "batch": batch.name,
+        "task": manifest["task"],
+        "levels": sorted({r["level"] for r in rows}),
+        "metrics": metrics,
         "audit_script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "audit_grader_sha256": hashlib.sha256(Path(grading.__file__).read_bytes()).hexdigest(),
         "strict_audit_note": "Ordered numeric result comparison; aliases and final prose are not scored.",
