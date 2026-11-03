@@ -103,7 +103,12 @@ def test_pi_engine_refuses(sql, error, synthetic_db):
 
 @pytest.mark.skipif(not shutil.which("duckdb"), reason="DuckDB CLI not installed")
 def test_pi_engine_settings(synthetic_db):
-    names = ["lock_configuration", "enable_external_access", "autoinstall_known_extensions", "autoload_known_extensions"]
+    names = [
+        "lock_configuration",
+        "enable_external_access",
+        "autoinstall_known_extensions",
+        "autoload_known_extensions",
+    ]
     sql = "SELECT " + ", ".join(f"current_setting('{n}')::VARCHAR" for n in names)
     result = pi_duckdb(synthetic_db, sql)
     assert result.returncode == 0, result.stderr
@@ -141,8 +146,12 @@ def test_work_dir_does_not_disclose_question_or_batch(tmp_path, monkeypatch, syn
             return harnesses.Usage()
 
     monkeypatch.setitem(harnesses.HARNESSES, "probe", Probe())
-    result = runner.run_one(Task.adhoc("Count rows", "SELECT 1", id="q01", db=synthetic_db), Agent("probe", "test"),
-                            batch="tpch-q01-experiment", record=False)
+    result = runner.run_one(
+        Task.adhoc("Count rows", "SELECT 1", id="q01", db=synthetic_db),
+        Agent("probe", "test"),
+        batch="tpch-q01-experiment",
+        record=False,
+    )
     assert not result.usage.error
     meta = json.loads((result.run_dir / "meta.json").read_text())
     assert not Path(meta["work_dir"]).exists()
@@ -158,8 +167,9 @@ def test_grid_retains_crashed_attempt_in_denominator(tmp_path, monkeypatch):
         raise RuntimeError("synthetic runner failure")
 
     monkeypatch.setattr(runner, "run_one", crash)
-    results = runner.run_grid([Task.adhoc("One", "SELECT 1")], ["pi:test"], repeats=2,
-                              jobs=2, batch="crash-check", quiet=True)
+    results = runner.run_grid(
+        [Task.adhoc("One", "SELECT 1")], ["pi:test"], repeats=2, jobs=2, batch="crash-check", quiet=True
+    )
     assert len(results) == 2
     assert all(r.verdict == "harness_error" and not r.correct for r in results)
     assert len(runner.load_scorecard("crash-check")) == 2
@@ -169,9 +179,20 @@ def test_agy_usage_does_not_double_count_thinking_or_cache(tmp_path):
     # Public CLI example plus the real SELECT-7 smoke show input+output == total;
     # cache and thinking are subsets, not additional billable tokens.
     log = tmp_path / "transcript.jsonl"
-    log.write_text(json.dumps({"status": "SUCCESS", "usage": {
-        "input_tokens": 10415, "output_tokens": 657, "thinking_tokens": 616,
-        "cache_read_tokens": 8113, "total_tokens": 11072}}))
+    log.write_text(
+        json.dumps(
+            {
+                "status": "SUCCESS",
+                "usage": {
+                    "input_tokens": 10415,
+                    "output_tokens": 657,
+                    "thinking_tokens": 616,
+                    "cache_read_tokens": 8113,
+                    "total_tokens": 11072,
+                },
+            }
+        )
+    )
     usage = harnesses.Antigravity().parse(None, log)
     assert usage.tokens_in == 2302
     assert usage.tokens_out == 657
@@ -180,13 +201,22 @@ def test_agy_usage_does_not_double_count_thinking_or_cache(tmp_path):
 
 def test_grok_usage_counts_only_terminal_aggregate(tmp_path):
     log = tmp_path / "transcript.jsonl"
-    log.write_text("\n".join(json.dumps(o) for o in [
-        {"type": "assistant", "message": {"usage": {"input_tokens": 100}}},
-        {"type": "result", "result": "Done", "num_turns": 3,
-         "usage": {"input_tokens": 9178, "output_tokens": 311,
-                   "cache_read_input_tokens": 8320},
-         "total_cost_usd": 0.024382, "modelUsage": {"grok-4.7-build": {"inputTokens": 9178}}},
-    ]))
+    log.write_text(
+        "\n".join(
+            json.dumps(o)
+            for o in [
+                {"type": "assistant", "message": {"usage": {"input_tokens": 100}}},
+                {
+                    "type": "result",
+                    "result": "Done",
+                    "num_turns": 3,
+                    "usage": {"input_tokens": 9178, "output_tokens": 311, "cache_read_input_tokens": 8320},
+                    "total_cost_usd": 0.024382,
+                    "modelUsage": {"grok-4.7-build": {"inputTokens": 9178}},
+                },
+            ]
+        )
+    )
     usage = harnesses.Grok().parse(None, log)
     assert usage.tokens_in == 9178 and usage.tokens_cache_read == 8320
     assert usage.tokens_out == 311 and usage.turns == 3

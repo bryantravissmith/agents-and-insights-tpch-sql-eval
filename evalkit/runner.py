@@ -716,7 +716,7 @@ def _execute(plan, batch, jobs, caps, db, quiet, run_kw) -> list[RunResult]:
 PROVIDER_FAILURE = re.compile(
     r"rate limit|credit balance|overloaded|temporarily unavailable|service unavailable|internal server error"
     r"|bad gateway|gateway timeout|an error occurred while processing your request|usage limit|limit reached"
-    r"|quota|resource_exhausted",
+    r"|quota|resource_exhausted|out of credits",
     re.IGNORECASE,
 )
 

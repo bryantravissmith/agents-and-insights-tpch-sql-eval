@@ -316,6 +316,18 @@ def test_resume_reruns_provider_failures_and_unfinished_runs(sandbox, monkeypatc
     assert runner.resume("flaky", jobs=1, questions=[qdir], quiet=True) == []
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        'OpenAI API error (429): 429 {"detail":"Rate limit exceeded"}',
+        'xai API error (402): 402 "You have run out of credits or need a Grok subscription."',
+        "quota reached. Please upgrade your subscription to increase your limits. Resets in 3h11m29s.",
+    ],
+)
+def test_provider_failures_are_recognized(error):
+    assert runner.PROVIDER_FAILURE.search(error)
+
+
 def test_resume_can_wait_on_one_agent(sandbox, monkeypatch, db, questions_on):
     _with_fake(monkeypatch, FakeHarness(Q04_BODY + "ORDER BY 1"))
     qdir = questions_on(db, "q04")
