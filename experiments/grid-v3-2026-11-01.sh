@@ -8,8 +8,8 @@
 # Plus the --ask-step batch: OpenAI's 7 agents, where an ask reveals the next brief, at terse and stakeholder only
 # (at spec there is no next brief, so it would repeat the main grid): 4,760 runs. It shares OpenAI's rate limits,
 # so it starts when the main OpenAI batch ends.
-# Gemini 3.8 Flash runs as its own lane (agy-flash) when its quota allows; Gemini 4 Argon follows once its weekly
-# quota resets (Nov 7), with the same frozen files.
+# Gemini 3.8 Flash ran as its own lane (agy-flash) as its quota allowed: 187 of 1,020 runs in a week, then it was
+# stopped and Gemini left out of v3 (2026-11-04). Gemini 4 Argon was never run.
 #
 #   bash experiments/grid-v3-2026-11-01.sh            # starts the three lanes in the background
 #   bash experiments/grid-v3-2026-11-01.sh openai     # one lane in the foreground (openai, ask-step, claude-code, xai)

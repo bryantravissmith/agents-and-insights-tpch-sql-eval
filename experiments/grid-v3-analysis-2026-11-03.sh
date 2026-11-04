@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Analysis of grid v3 (experiments/grid-v3-2026-11-01.sh): the frozen v3 questions, --declare-columns, --allow-ask.
 # Re-runs nothing; it reads the batches under results/ and writes everything to results/analysis-v3-2026-11-03/.
-# Gemini 3.8 Flash is partial (quota-limited, resumed in passes) and Gemini 4 Argon has not run yet; re-run this
-# script once they finish. The --ask-step batch is analyzed on its own: its runs could see more of the brief.
+# Gemini is left out (decided 2026-11-04): Flash's quota allowed 187 of its 1,020 runs in a week
+# (20261101-172317-grid-v3-agy-flash, stopped) and Argon never ran. The --ask-step batch is analyzed on its own:
+# its runs could see more of the brief.
 #
 #   bash experiments/grid-v3-analysis-2026-11-03.sh
 set -euo pipefail
@@ -12,7 +13,6 @@ BATCHES=(
   20261101-161536-grid-v3-openai       # pi, OpenAI models
   20261101-161536-grid-v3-claude-code  # Claude Code on a subscription, Claude models
   20261101-161536-grid-v3-xai          # pi, Grok models
-  20261101-172317-grid-v3-agy-flash    # Antigravity, Gemini 3.8 Flash (partial)
 )
 ASK_STEP=20261101-210805-grid-v3-openai-ask-step
 OUT=results/analysis-v3-2026-11-03
