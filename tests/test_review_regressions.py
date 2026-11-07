@@ -51,8 +51,8 @@ def pi_duckdb(db, sql) -> subprocess.CompletedProcess:
     """Run the duckdb CLI with the argument list the pi extension passes, read from the extension itself."""
     src = (HERE / "extensions" / "duckdb-tools.ts").read_text()
     body = re.search(r"const args = \[(.*?)\];", src, re.DOTALL).group(1)
-    tokens = re.findall(r'"([^"]*)"|\b(DB|sql)\b', body)
-    args = [lit or {"DB": str(db), "sql": sql}[name] for lit, name in tokens]
+    tokens = re.findall(r'"([^"]*)"|\b(DB|sqlArg)\b', body)
+    args = [lit or {"DB": str(db), "sqlArg": " " + sql}[name] for lit, name in tokens]
     return subprocess.run(["duckdb", *args], capture_output=True, text=True, check=False)
 
 
@@ -221,3 +221,39 @@ def test_grok_usage_counts_only_terminal_aggregate(tmp_path):
     assert usage.tokens_in == 9178 and usage.tokens_cache_read == 8320
     assert usage.tokens_out == 311 and usage.turns == 3
     assert usage.cost_usd == 0.024382
+
+
+# ---------- pi's tools pass the SQL on stdin: a statement may start with a comment or a dash ----------
+
+LEADING_COMMENT = "-- orders per customer\nSELECT count(*) AS n FROM orders"
+
+
+@pytest.mark.skipif(not shutil.which("duckdb"), reason="DuckDB CLI not installed")
+def test_pi_tools_run_sql_that_starts_with_a_comment(tmp_path, synthetic_db):
+    # On 2026-11-07, the CLI read a statement passed as an argument and starting with "--" as an option
+    # ("Unknown Option Error: Unrecognized option '- orders per customer ..."): 26 Grok runs in grid v3 hit it.
+    from test_ask import _transpiled
+
+    module = _transpiled(tmp_path)
+    driver = tmp_path / "driver.mjs"
+    driver.write_text(
+        f"import ext from {json.dumps(str(module))};\n"
+        "const tools = {};\n"
+        "ext({ registerTool: (t) => { tools[t.name] = t; } });\n"
+        f"const sql = {json.dumps(LEADING_COMMENT)};\n"
+        "const out = {};\n"
+        "for (const name of ['run_sql', 'submit_sql']) {\n"
+        "  try { out[name] = (await tools[name].execute('id', { sql })).content[0].text; }\n"
+        "  catch (e) { out[name] = 'ERROR ' + e.message; }\n"
+        "}\n"
+        "console.log(JSON.stringify(out));\n"
+    )
+    path = ":".join(str(Path(shutil.which(b)).parent) for b in ("node", "duckdb"))
+    env = {"PATH": path, "AUDIT_DB": str(synthetic_db), "AUDIT_OUT": str(tmp_path / "run")}
+    run = subprocess.run(["node", str(driver)], capture_output=True, text=True, check=False, env=env)
+    assert run.returncode == 0, run.stderr
+    got = json.loads(run.stdout)
+    expected = duckdb.connect(str(synthetic_db), read_only=True).execute("SELECT count(*) FROM orders").fetchone()[0]
+    assert got["run_sql"].startswith(f"n\n{expected}\n"), got["run_sql"]
+    assert not got["submit_sql"].startswith("ERROR"), got["submit_sql"]
+    assert (tmp_path / "run" / "answer.sql").read_text() == LEADING_COMMENT + "\n"

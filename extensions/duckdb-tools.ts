@@ -175,6 +175,9 @@ function duckdb(sql: string): string {
   if (!existsSync(DB)) throw new Error(`Database not found at ${DB}. Run setup_db.py first.`);
   // Same engine settings as ENGINE_CONFIG in ../sqlguard.py. .safe_mode disables external access and locks the
   // configuration, so the settings it must not see changed come before it and nothing can change after it.
+  // The statement goes last, after a space: the CLI reads an argument that starts with "-" as an option, and agents
+  // often open a query with a "--" comment. Not stdin, where a line that starts with "." is a CLI command.
+  const sqlArg = " " + sql;
   const args = [
     "-no-init",
     "-readonly",
@@ -188,7 +191,7 @@ function duckdb(sql: string): string {
     "-cmd",
     ".safe_mode",
     DB,
-    sql,
+    sqlArg,
   ];
   return execFileSync("duckdb", args, {
     encoding: "utf8",
